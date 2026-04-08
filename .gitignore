@@ -1,0 +1,49 @@
+# ── JavaScript / Node ─────────────────────────────
+node_modules/
+dist/
+out/
+release/
+
+# ── Python ────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+.venv/
+venv/
+.Python
+
+# ── AI / ML models (large binaries) ──────────────
+resources/models/
+*.onnx
+*.ppn
+*.pth
+*.bin
+
+# ── Environment & Secrets ─────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ── IDE ───────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── OS ────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Logs ──────────────────────────────────────────
+*.log
+npm-debug.log*
+logs/
+
+# ── Vite / Build cache ────────────────────────────
+.vite/
+tsconfig.tsbuildinfo
+
+# ── Yuki personal data (memory, history) — never commit ───────────────────────
+backend/data/

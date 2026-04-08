@@ -1,0 +1,38 @@
+/* ═══════════════════════════════════════════
+   TOAST STYLES
+   ═══════════════════════════════════════════ */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  cursor: pointer;
+}
+
+.toast--info {
+  border-color: rgba(108, 99, 255, 0.2);
+}
+.toast--success {
+  border-color: rgba(52, 211, 153, 0.3);
+}
+.toast--warning {
+  border-color: rgba(251, 191, 36, 0.3);
+}
+.toast--error {
+  border-color: rgba(248, 113, 113, 0.3);
+}
+
+.toast-message {
+  flex: 1;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.toast-close {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  opacity: 0.5;
+}
+.toast-close:hover {
+  opacity: 1;
+}

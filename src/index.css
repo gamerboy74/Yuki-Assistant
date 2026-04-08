@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    @apply w-full h-full overflow-hidden;
+  }
+
+  /* Material Symbols font variation */
+  .material-symbols-outlined {
+    font-family: 'Material Symbols Outlined';
+    font-variation-settings: 'FILL' 0, 'wght' 200, 'GRAD' 0, 'opsz' 24;
+    user-select: none;
+  }
+}
+
+@layer utilities {
+  /* Electron window drag regions */
+  .drag-region     { -webkit-app-region: drag; }
+  .no-drag-region  { -webkit-app-region: no-drag; }
+
+  /* Scrollbar: hidden */
+  .hide-scrollbar::-webkit-scrollbar { display: none; }
+  .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  /* Scrollbar: subtle */
+  .subtle-scrollbar::-webkit-scrollbar       { width: 4px; }
+  .subtle-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .subtle-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(143, 245, 255, 0.12);
+    border-radius: 999px;
+  }
+
+  /* Glassmorphism panel */
+  .glass-panel {
+    background: rgba(12, 14, 17, 0.45);
+    backdrop-filter: blur(32px) saturate(180%);
+    -webkit-backdrop-filter: blur(32px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  /* Compact pill glass — for MiniWidget */
+  .glass-mini {
+    background: rgba(10, 12, 15, 0.85);
+    backdrop-filter: blur(48px) saturate(200%);
+    -webkit-backdrop-filter: blur(48px) saturate(200%);
+    border: 1px solid rgba(143, 245, 255, 0.2);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset;
+  }
+
+  .voice-orb-glow {
+    box-shadow: 0 0 32px rgba(143, 245, 255, 0.15);
+  }
+
+  .asymmetric-canvas {
+    background-image: radial-gradient(circle at 80% 20%, rgba(143, 245, 255, 0.03) 0%, transparent 50%);
+  }
+
+  /* Aetheris primary gradient orb */
+  .orb-gradient {
+    background: linear-gradient(135deg, #8ff5ff 0%, #00eefc 100%);
+  }
+
+  /* Dot-grid decorative overlay */
+  .dot-grid {
+    background-image: radial-gradient(#8ff5ff 0.5px, transparent 0.5px);
+    background-size: 24px 24px;
+  }
+
+  /* Timing function utility */
+  .ease-out-expo { transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+}
+
+/* ── Animations ─────────────────────────────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Waveform bar — animates height from bottom up */
+@keyframes visualizerBar {
+  0%   { transform: scaleY(0.2); }
+  50%  { transform: scaleY(1);   }
+  100% { transform: scaleY(0.2); }
+}
+
+/* Orb idle breathing */
+@keyframes orbBreath {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50%       { transform: scale(1.03); opacity: 1; }
+}
+
+/* Spin for processing ring */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Ripple for listening rings */
+@keyframes ripple {
+  0%   { transform: scale(1);    opacity: 0.6; }
+  100% { transform: scale(1.4);  opacity: 0;   }
+}
+
+.animate-fade-in  { animation: fadeIn  0.4s ease-out both; }
+.animate-slide-up { animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-breath   { animation: orbBreath 3s ease-in-out infinite; }
+.animate-ripple   { animation: ripple 1.5s ease-out infinite; }
+.viz-bar          { transform-origin: bottom; animation: visualizerBar 1.2s ease-in-out infinite; }
+
+/* Custom range slider */
+input[type="range"] { -webkit-appearance: none; background: transparent; }
+input[type="range"]::-webkit-slider-runnable-track {
+  background: #1d2024; height: 4px; border-radius: 2px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 16px; width: 16px; border-radius: 50%;
+  background: #8ff5ff; margin-top: -6px; cursor: pointer;
+  box-shadow: 0 0 10px rgba(143, 245, 255, 0.4);
+}

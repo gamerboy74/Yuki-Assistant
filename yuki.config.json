@@ -1,0 +1,24 @@
+{
+  "assistant": {
+    "name": "Yuki",
+    "wake_words": ["hey yuki", "ok yuki", "yuki"],
+    "greeting": "Hey! I'm Yuki. Ask me anything, or say \"Hey Yuki\" to activate voice mode.",
+    "idle_label": "SAY \"HEY YUKI\"",
+    "tts_voice": "en-IN-NeerjaNeural"
+  },
+  "ollama": {
+    "model": "gemma3:4b",
+    "base_url": "http://localhost:11434"
+  },
+  "whisper": {
+    "model_size": "base",
+    "silence_threshold": 300,
+    "silence_timeout": 1.2,
+    "max_record_secs": 12
+  },
+  "router": {
+    "enabled": true,
+    "fuzzy_threshold": 0.72,
+    "log_fast_path": true
+  }
+}

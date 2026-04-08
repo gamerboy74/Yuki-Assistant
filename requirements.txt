@@ -1,0 +1,33 @@
+# ── Yuki Voice Assistant — Python Dependencies ────────────────────────────────
+# Install with: pip install -r requirements.txt
+# Note: on Windows, PyAudio may need: pip install pipwin && pipwin install pyaudio
+
+# ── Core: Speech Recognition (Whisper — offline, multilingual) ────────────────
+faster-whisper>=1.0.0          # Local offline STT — handles Hindi/Hinglish/English
+
+# ── Wake Word Detection (offline, instant) ────────────────────────────────────
+pvporcupine>=3.0.0             # Porcupine wake word — set PICOVOICE_KEY env var
+pyaudio>=0.2.14                # Microphone input
+
+# ── Fallback STT (Google, requires internet) ──────────────────────────────────
+SpeechRecognition>=3.8.1       # Fallback wake word when pvporcupine unavailable
+
+# ── Text-to-Speech (Microsoft neural voices, free) ───────────────────────────
+edge-tts>=6.1.9                # Premium neural TTS via Edge browser API
+pygame>=2.5.0                  # Audio playback for edge-tts output
+
+# ── AI Brain ──────────────────────────────────────────────────────────────────
+openai>=1.0.0                  # GPT-4o for intent parsing + conversation
+
+# ── Configuration ─────────────────────────────────────────────────────────────
+python-dotenv>=0.19.0          # Load .env for API keys
+
+# ── OS Actions & Automation ───────────────────────────────────────────────────
+pyautogui>=0.9.54              # Type text, take screenshots
+playwright>=1.40.0             # WhatsApp Web + YouTube automation
+psutil>=5.9.0                  # Battery, CPU, RAM system info
+
+# ── Optional / Legacy (kept for backward compat) ─────────────────────────────
+pyttsx3>=2.90                  # Fallback TTS if edge-tts fails
+PyQt6>=6.4.0                   # Legacy GUI support (not used in new assistant.py)
+schedule>=1.2.0                # Task scheduling

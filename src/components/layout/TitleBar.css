@@ -1,0 +1,166 @@
+/* ═══════════════════════════════════════════
+   CUSTOM TITLE BAR — Yuki AI
+   ═══════════════════════════════════════════ */
+.titlebar {
+  height: var(--titlebar-height, 40px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(
+    90deg,
+    rgba(13, 13, 20, 0.98) 0%,
+    rgba(18, 16, 32, 0.98) 100%
+  );
+  border-bottom: 1px solid rgba(108, 99, 255, 0.18);
+  z-index: var(--z-titlebar, 9000);
+  flex-shrink: 0;
+  position: relative;
+}
+
+/* Subtle glow line at bottom */
+.titlebar::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(108, 99, 255, 0.4), rgba(0, 229, 255, 0.3), transparent);
+}
+
+/* ── Drag Region ── */
+.titlebar-drag-region {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  -webkit-app-region: drag;
+  app-region: drag;
+  padding-left: var(--space-4, 16px);
+}
+
+/* ── Brand ── */
+.titlebar-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 12px);
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  pointer-events: none;
+}
+
+.titlebar-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: titlebar-spin 20s linear infinite;
+  filter: drop-shadow(0 0 4px rgba(108, 99, 255, 0.5));
+}
+
+@keyframes titlebar-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.titlebar-title {
+  font-family: var(--font-display, 'Outfit', sans-serif);
+  font-weight: 700;
+  font-size: var(--text-sm, 0.8125rem);
+  color: var(--text-primary, #F0F0F5);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.titlebar-shortcut {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-xs, 0.6875rem);
+  color: var(--accent-secondary, #00E5FF);
+  padding: 2px 8px;
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  border-radius: var(--radius-xs, 4px);
+  margin-left: 4px;
+  background: rgba(0, 229, 255, 0.06);
+  letter-spacing: 0.03em;
+}
+
+/* ── Window Controls ── */
+.titlebar-controls {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  gap: 2px;
+  padding-right: 8px;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.titlebar-btn {
+  width: 34px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: rgba(148, 148, 168, 0.7);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast, 150ms) ease,
+    color var(--duration-fast, 150ms) ease,
+    transform var(--duration-fast, 150ms) ease;
+  outline: none;
+  position: relative;
+}
+
+.titlebar-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  transform: scale(1.05);
+}
+
+.titlebar-btn:active {
+  transform: scale(0.95);
+}
+
+/* Minimize — yellow on hover */
+.titlebar-btn--minimize:hover {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
+
+/* Maximize — green on hover */
+.titlebar-btn--maximize:hover {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+
+/* Close — red on hover (hides to tray) */
+.titlebar-btn--close:hover {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
+}
+
+/* Tooltip shown on close button */
+.titlebar-btn--close::after {
+  content: 'Hide to tray';
+  position: absolute;
+  bottom: -28px;
+  right: 0;
+  background: rgba(15, 15, 22, 0.95);
+  color: rgba(240, 240, 245, 0.8);
+  font-size: 10px;
+  font-family: var(--font-body, sans-serif);
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  z-index: 9999;
+}
+
+.titlebar-btn--close:hover::after {
+  opacity: 1;
+}

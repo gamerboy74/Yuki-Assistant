@@ -1,0 +1,42 @@
+{
+  "open_recycle_bin": {
+    "patterns": [
+      "open recycle bin",
+      "show recycle bin",
+      "open trash",
+      "show trash"
+    ]
+  },
+  "delete_all_files": {
+    "patterns": [
+      "delete all files",
+      "empty recycle bin",
+      "clear recycle bin"
+    ]
+  },
+  "play_spotify": {
+    "patterns": [
+      "play spotify",
+      "open spotify"
+    ]
+  },
+  "play_youtube": {
+    "patterns": [
+      "play (?P<song>.+) on youtube",
+      "play youtube (?P<song>.+)",
+      "play (?P<song>.+)"
+    ]
+  },
+  "write_notepad": {
+    "patterns": [
+      "write (?P<text>.+)",
+      "type (?P<text>.+)"
+    ]
+  },
+  "send_whatsapp": {
+    "patterns": [
+      "send whatsapp to (?P<number>\\+?[0-9]+) (?P<message>.+)",
+      "whatsapp (?P<number>\\+?[0-9]+) (?P<message>.+)"
+    ]
+  }
+}
