@@ -4,15 +4,17 @@ interface TopNavBarProps {
   activePage: string;
   onNavigate: (page: string) => void;
   onMiniToggle?: () => void;
+  stats?: any;
 }
 
 const NAV_LINKS = [
+  { id: 'dashboard',label: 'Dashboard' },
   { id: 'chat',     label: 'Intelligence' },
   { id: 'history',  label: 'History' },
   { id: 'settings', label: 'Settings' },
 ];
 
-export default function TopNavBar({ activePage, onNavigate, onMiniToggle }: TopNavBarProps) {
+export default function TopNavBar({ activePage, onNavigate, onMiniToggle, stats }: TopNavBarProps) {
   return (
     <header
       className="fixed top-0 left-0 right-0 z-50 bg-background drag-region"
@@ -55,6 +57,29 @@ export default function TopNavBar({ activePage, onNavigate, onMiniToggle }: TopN
             <span className="material-symbols-outlined absolute right-3 top-2 text-on-surface-variant/60 text-lg select-none">
               search
             </span>
+          </div>
+
+          {/* System Indicators */}
+          <div className="flex items-center gap-4 bg-surface-container/30 px-4 py-1.5 rounded-full border border-outline-variant/5">
+             {/* CPU */}
+             <div className="flex items-center gap-1.5" title="CPU Load">
+               <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+               <span className="text-[10px] font-mono text-on-surface/70">{stats?.cpu || 0}%</span>
+             </div>
+             {/* RAM */}
+             <div className="flex items-center gap-1.5" title="Memory Usage">
+               <span className="w-1.5 h-1.5 rounded-full bg-secondary" />
+               <span className="text-[10px] font-mono text-on-surface/70">{stats?.ram || 0}%</span>
+             </div>
+             {/* Battery */}
+             {stats?.battery?.percent !== null && (
+               <div className="flex items-center gap-1.5" title="Battery Status">
+                 <span className={`material-symbols-outlined text-sm ${stats?.battery?.charging ? 'text-green-400' : 'text-on-surface/40'}`}>
+                   {stats?.battery?.charging ? 'battery_charging_full' : 'battery_std'}
+                 </span>
+                 <span className="text-[10px] font-mono text-on-surface/70">{stats?.battery?.percent}%</span>
+               </div>
+             )}
           </div>
 
           {/* Window controls */}

@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('yukiAPI', {
   // Send a typed text message to Python
   sendMessage: (text) => ipcRenderer.send('yuki:message', text),
 
+  // Notify Python that the React UI has fully mounted
+  sendUIReady: () => ipcRenderer.send('yuki:ui-ready'),
+
   // History
   saveHistory: (messages) => ipcRenderer.send('yuki:save-history', messages),
   onLoadHistory: (callback) => {

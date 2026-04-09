@@ -1,6 +1,7 @@
 {
   "name": "yuki-ai",
   "version": "3.0.0",
+  "type": "module",
   "description": "Yuki — Your intelligent voice assistant",
   "main": "electron/main.cjs",
   "scripts": {

@@ -16,6 +16,7 @@ venv/
 
 # ── AI / ML models (large binaries) ──────────────
 resources/models/
+backend/models/
 *.onnx
 *.ppn
 *.pth

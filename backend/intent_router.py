@@ -144,6 +144,11 @@ def _extract_minutes(text: str) -> int:
 
 def _handle_open(m: re.Match, text: str) -> dict:
     raw = (m.group("app") or "").strip() or text.replace("open","").replace("launch","").replace("start","").strip()
+    
+    # If it's a multi-step command like "open chrome and ...", let the agentic AI brain handle it.
+    if " and " in raw or " search " in raw or " to " in raw:
+        return None  # type: ignore[return-value]
+
     app = _fuzzy_app(raw)
     return _result("open_app", {"name": app}, f"Opening {app}.")
 
@@ -232,6 +237,15 @@ def _handle_reminder(m: re.Match, text: str) -> dict:
     about   = about_m.group(1).strip() if about_m else "something"
     return _result("reminder", {"text": about, "delay_minutes": delay},
                    f"I'll remind you in {delay} minutes.")
+
+def _handle_media_playpause(_m, _text) -> dict:
+    return _result("media_controls", {"action": "playpause"}, "Okay.")
+
+def _handle_media_next(_m, _text) -> dict:
+    return _result("media_controls", {"action": "next"}, "Next track.")
+
+def _handle_media_prev(_m, _text) -> dict:
+    return _result("media_controls", {"action": "previous"}, "Previous track.")
 
 def _handle_greeting(_m, _text) -> dict:
     aname = cfg["assistant"]["name"]
@@ -447,6 +461,20 @@ _PATTERNS: list[tuple[str, object]] = [
     # ── Memory — store arbitrary fact ─────────────────────────────────────────
     (r"^(remember( that)?|yuki remember|yaad rakh( ki)?|yaad rakho( ki)?)\s+.+",
      _handle_remember_fact),
+
+    # ── Media Controls ────────────────────────────────────────────────────────
+    (r"(pause( the)? music|pause|stop( the)? music|pause song|gaana band karo|music band karo|play( the)? music|resume( the)? music|play song|gaana chalao)",
+     _handle_media_playpause),
+
+    (r"(next( song| track)?|skip( song| track)?|agla gaana(?: lagao| chalao| bajao)?|change( the)? song|change( the)? track)",
+     _handle_media_next),
+
+    (r"(previous( song| track)?|last( song| track)?|peeche wala gaana|pichla gaana|go back)",
+     _handle_media_prev),
+
+    # ── Close active window ───────────────────────────────────────────────────
+    (r"(close (this|the active|the current) (window|app)?|band (kar do|kardo))",
+     lambda m, text: _result("close_app", {"name": "active"}, "Closing the active window.")),
 
     # ── Close app — English + Hindi (before open, more specific) ────────────
     (r"(close|quit|exit|kill|band karo|band kar)\s+(?P<app>[a-z][a-z0-9 ]{1,30})",

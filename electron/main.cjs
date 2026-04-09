@@ -248,6 +248,11 @@ ipcMain.on('yuki:message', (event, text) => {
   sendToPython({ type: 'text_input', value: text });
 });
 
+ipcMain.on('yuki:ui-ready', () => {
+  console.log('[Yuki Renderer →]', 'UI Ready');
+  sendToPython({ type: 'ui_ready' });
+});
+
 // History persistence
 ipcMain.on('yuki:save-history', (event, messages) => {
   try {

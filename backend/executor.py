@@ -56,8 +56,10 @@ APP_MAP = {
 # Map of app names to process names for killing
 KILL_MAP = {
     "chrome":       "chrome.exe",
+    "google chrome": "chrome.exe",
     "firefox":      "firefox.exe",
     "edge":         "msedge.exe",
+    "microsoft edge": "msedge.exe",
     "notepad":      "notepad.exe",
     "spotify":      "Spotify.exe",
     "discord":      "Discord.exe",
@@ -66,11 +68,14 @@ KILL_MAP = {
     "vscode":       "Code.exe",
     "word":         "WINWORD.EXE",
     "excel":        "EXCEL.EXE",
+    "powerpoint":   "POWERPNT.EXE",
     "whatsapp":     "WhatsApp.exe",
     "telegram":     "Telegram.exe",
     "zoom":         "Zoom.exe",
     "teams":        "Teams.exe",
     "slack":        "slack.exe",
+    "calculator":   "CalculatorApp.exe",
+    "calc":         "CalculatorApp.exe",
 }
 
 
@@ -85,6 +90,13 @@ def execute(action: dict) -> Union[str, dict, None]:
     params = action.get("params", {})
 
     logger.info(f"Executing: {atype} | params: {params}")
+
+    if atype != "none":
+        import json
+        try:
+            print(json.dumps({"type": "loading", "text": f"RUNNING {atype.upper().replace('_', ' ')}..."}), flush=True)
+        except Exception:
+            pass
 
     try:
         if atype == "open_app":
@@ -122,6 +134,8 @@ def execute(action: dict) -> Union[str, dict, None]:
             return _clipboard_copy(params)
         elif atype == "reminder":
             return _reminder(params)
+        elif atype == "media_controls":
+            return _media_controls(params)
         # ───────────────────────────────────────────────────────────────────
         elif atype == "none":
             return None  # Pure conversation — no OS action needed
@@ -156,15 +170,31 @@ def _open_app(params: dict) -> None:
     return None
 
 
-def _close_app(params: dict) -> None:
+def _close_app(params: dict) -> str:
     name = params.get("name", "").lower().strip()
+    
+    if name in ["active", "this", "window", "current"]:
+        try:
+            import pyautogui
+            pyautogui.hotkey("alt", "f4")
+            return "Closed the active window."
+        except Exception:
+            # PowerShell fallback to close active window
+            script = "(New-Object -ComObject WScript.Shell).SendKeys('%{F4}')"
+            subprocess.Popen(["powershell", "-WindowStyle", "Hidden", "-Command", script],
+                             creationflags=subprocess.CREATE_NO_WINDOW)
+            return "Attempted to close the active window."
+
     proc = KILL_MAP.get(name, f"{name}.exe")
     try:
-        subprocess.Popen(["taskkill", "/f", "/im", proc], shell=True,
+        # Check if process is running first (optional but cleaner)
+        # Using /t for tree kill (closes child processes like chrome tabs/windows)
+        subprocess.Popen(["taskkill", "/f", "/t", "/im", proc], shell=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return f"Closed {name}."
     except Exception as e:
         logger.error(f"Close app error: {e}")
-    return None
+        return f"Couldn't close {name}."
 
 
 def _type_text(params: dict) -> None:
@@ -334,6 +364,29 @@ def _send_whatsapp_file(params: dict) -> Union[str, dict, None]:
 def _play_youtube(params: dict) -> None:
     query = params.get("query", "")
     auto_play = params.get("auto_play", True)
+    
+    import urllib.request
+    import urllib.parse
+    import re
+    
+    try:
+        # Fetch youtube search HTML
+        encoded = urllib.parse.quote(query)
+        url = f"https://www.youtube.com/results?search_query={encoded}"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        html = urllib.request.urlopen(req, timeout=5).read().decode('utf-8')
+        
+        # Find the first video ID
+        video_ids = re.findall(r'"videoId":"([a-zA-Z0-9_-]{11})"', html)
+        if video_ids and auto_play:
+            unique_ids = list(dict.fromkeys(video_ids))
+            # Append &list=RD{video_id} to trigger a YouTube Mix (Radio)
+            video_url = f"https://www.youtube.com/watch?v={unique_ids[0]}&list=RD{unique_ids[0]}"
+            webbrowser.open(video_url)
+            return None
+    except Exception as e:
+        logger.debug(f"Youtube auto-play scrape failed: {e}")
+        
     url = f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
     webbrowser.open(url)
     return None
@@ -372,9 +425,7 @@ def _play_spotify(params: dict) -> Union[str, dict]:
                         "$proc = Get-Process -Name 'Spotify' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; "
                         "if ($proc) { "
                         "  $wshell.AppActivate($proc.Id); Start-Sleep -m 500; "
-                        "  $wshell.SendKeys('{TAB}'); Start-Sleep -m 100; "
-                        "  $wshell.SendKeys('{ENTER}'); Start-Sleep -m 100; "
-                        "  $wshell.SendKeys(' '); "
+                        "  $wshell.SendKeys('{ENTER}'); "
                         "}"
                     )
                     subprocess.Popen(["powershell", "-WindowStyle", "Hidden", "-Command", script], creationflags=subprocess.CREATE_NO_WINDOW)
@@ -627,6 +678,144 @@ def _get_weather(params: dict) -> str:
     except Exception as e:
         logger.error(f"get_weather error: {e}")
         return f"Couldn't fetch weather for {city} right now."
+
+
+def _detect_audio_app() -> tuple[str | None, int | None]:
+    """
+    Detect which process is currently producing audio using the Windows
+    Core Audio API (pycaw).
+    Returns (process_name, pid) or (None, None) if not found.
+    
+    Priority order: Spotify > Chrome/YouTube > any other audio process.
+    """
+    PRIORITY_APPS = ["Spotify", "chrome", "msedge", "firefox", "vlc", "groove"]
+    
+    try:
+        from pycaw.pycaw import AudioUtilities
+        import psutil
+        
+        sessions = AudioUtilities.GetAllSessions()
+        candidates: list[tuple[int, str, int]] = []  # (priority, name, pid)
+        
+        for session in sessions:
+            if session.Process is None:
+                continue
+            pid = session.Process.Id
+            try:
+                proc = psutil.Process(pid)
+                proc_name = proc.name()  # e.g. "Spotify.exe", "chrome.exe"
+                base = proc_name.lower().replace(".exe", "")
+                
+                # Check if this process has an active audio state
+                # SimpleAudioVolume.GetMute() being False is a weak signal;
+                # instead we enumerate session state
+                try:
+                    state = session.State  # 0=inactive, 1=active, 2=expired
+                    if state != 1:
+                        continue
+                except Exception:
+                    pass
+                
+                # Assign a priority score
+                priority = 99
+                for i, app in enumerate(PRIORITY_APPS):
+                    if app.lower() in base:
+                        priority = i
+                        break
+                
+                candidates.append((priority, proc_name, pid))
+                logger.debug(f"[AUDIO DETECT] Active audio: {proc_name} (pid={pid}, priority={priority})")
+                
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        
+        if candidates:
+            candidates.sort(key=lambda x: x[0])
+            _, proc_name, pid = candidates[0]
+            return proc_name, pid
+            
+    except Exception as e:
+        logger.debug(f"[AUDIO DETECT] pycaw detection failed: {e}")
+    
+    return None, None
+
+
+def _focus_and_press(pid: int, key: str) -> bool:
+    """
+    Flash-focus the window of the given PID, press the key, then restore.
+    Returns True if successful.
+    """
+    # Map pyautogui key name to character codes for wscript.shell SendKeys
+    # VK_MEDIA_NEXT_TRACK = 176, VK_MEDIA_PREV_TRACK = 177, VK_MEDIA_PLAY_PAUSE = 179
+    key_code = {
+        "playpause": "[char]179",
+        "nexttrack": "[char]176",
+        "prevtrack": "[char]177",
+    }.get(key, "[char]179")
+    
+    try:
+        script = (
+            f"$wshell = New-Object -ComObject wscript.shell; "
+            f"$proc = Get-Process -Id {pid} -ErrorAction SilentlyContinue; "
+            f"if ($proc) {{ "
+            f"  $wshell.AppActivate($proc.Id); "
+            f"  Start-Sleep -Milliseconds 400; "
+            f"  $wshell.SendKeys({key_code}); "
+            f"  Write-Output 'ok' "
+            f"}}"
+        )
+        result = subprocess.run(
+            ["powershell", "-WindowStyle", "Hidden", "-Command", script],
+            capture_output=True, text=True, timeout=3,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        if "ok" in result.stdout:
+            return True
+    except Exception as e:
+        logger.debug(f"[FOCUS PRESS] failed: {e}")
+    return False
+
+
+def _media_controls(params: dict) -> str:
+    """
+    Smart media controls:
+    1. Detect which app is currently producing audio via Windows Core Audio API.
+    2. Briefly focus that app's window and send the correct media keystroke.
+    3. Falls back to global pyautogui media keys if no active audio app found.
+    """
+    action = params.get("action", "playpause")
+    
+    key_map = {
+        "playpause": "playpause",
+        "next":      "nexttrack",
+        "previous":  "prevtrack",
+    }
+    pyautogui_key = key_map.get(action, "playpause")
+    
+    action_desc = {
+        "playpause": "Playing/Pausing",
+        "next":      "Skipping to next track",
+        "previous":  "Going to previous track",
+    }.get(action, "Controlling")
+    
+    # ── Step 1: Detect which app is playing audio ──────────────────────────
+    proc_name, pid = _detect_audio_app()
+    
+    if pid:
+        logger.info(f"[MEDIA] Detected audio app: {proc_name} (pid={pid}), action={action}")
+        success = _focus_and_press(pid, pyautogui_key)
+        if success:
+            return f"{action_desc} on {proc_name.replace('.exe', '')}."
+    
+    # ── Step 2: Fallback — global OS media key ─────────────────────────────
+    logger.info(f"[MEDIA] No active audio app detected, using global media key: {pyautogui_key}")
+    try:
+        import pyautogui
+        pyautogui.press(pyautogui_key)
+        return f"{action_desc}."
+    except Exception as e:
+        logger.error(f"[MEDIA] Global key failed: {e}")
+        return "Couldn't control media playback."
 
 
 def _clipboard_copy(params: dict) -> str:

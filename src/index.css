@@ -32,21 +32,20 @@
     border-radius: 999px;
   }
 
-  /* Glassmorphism panel */
-  .glass-panel {
-    background: rgba(12, 14, 17, 0.45);
-    backdrop-filter: blur(32px) saturate(180%);
-    -webkit-backdrop-filter: blur(32px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.07);
+  /* Glassmorphism card — for Dashboard */
+  .glass-card {
+    background: rgba(25, 28, 32, 0.4);
+    backdrop-filter: blur(24px) saturate(150%);
+    -webkit-backdrop-filter: blur(24px) saturate(150%);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 1.5rem;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    transition: all 0.3s ease-out;
   }
-
-  /* Compact pill glass — for MiniWidget */
-  .glass-mini {
-    background: rgba(10, 12, 15, 0.85);
-    backdrop-filter: blur(48px) saturate(200%);
-    -webkit-backdrop-filter: blur(48px) saturate(200%);
-    border: 1px solid rgba(143, 245, 255, 0.2);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset;
+  .glass-card:hover {
+    border-color: rgba(143, 245, 255, 0.15);
+    background: rgba(30, 33, 38, 0.5);
+    transform: translateY(-4px);
   }
 
   .voice-orb-glow {
@@ -107,10 +106,25 @@
   100% { transform: scale(1.4);  opacity: 0;   }
 }
 
+/* Very slow pulse for ambient elements */
+@keyframes pulseSlow {
+  0%, 100% { opacity: 0.8; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.05); }
+}
+
+/* Floating effect for background items */
+@keyframes float {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  50%      { transform: translateY(-20px) rotate(2deg); }
+}
+
 .animate-fade-in  { animation: fadeIn  0.4s ease-out both; }
 .animate-slide-up { animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .animate-breath   { animation: orbBreath 3s ease-in-out infinite; }
 .animate-ripple   { animation: ripple 1.5s ease-out infinite; }
+.animate-pulse-slow { animation: pulseSlow 4s ease-in-out infinite; }
+.animate-float    { animation: float 10s ease-in-out infinite; }
+
 .viz-bar          { transform-origin: bottom; animation: visualizerBar 1.2s ease-in-out infinite; }
 
 /* Custom range slider */

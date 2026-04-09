@@ -2,16 +2,17 @@
 // Manages global state (yukiAPI IPC), handles routing between pages,
 // and renders the shared TopNavBar + SideNavBar chrome.
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useConfig } from './hooks/useConfig';
 import TopNavBar from './components/layout/TopNavBar';
 import SideNavBar from './components/layout/SideNavBar';
 import AgentView  from './pages/AgentView';
 import History    from './pages/History';
 import Settings   from './pages/Settings';
+import Dashboard  from './pages/Dashboard';
 import MiniWidget from './components/MiniWidget';
 
-export type Page = 'chat' | 'listen' | 'history' | 'settings';
+export type Page = 'chat' | 'listen' | 'history' | 'settings' | 'dashboard';
 
 export type OrbState = 'idle' | 'listening' | 'speaking' | 'processing';
 
@@ -20,6 +21,7 @@ export interface YukiMsg {
   text?: string;
   question?: string;
   options?: string[];
+  data?: any;
 }
 
 export interface ChatMessage {
@@ -41,6 +43,7 @@ declare global {
       sendChoice:          (choice: string) => void;
       trigger:             () => void;
       sendMessage:         (text: string) => void;
+      sendUIReady:         () => void;
       saveHistory:         (messages: ChatMessage[]) => void;
       onLoadHistory:       (cb: (messages: ChatMessage[]) => void) => void;
       removeStateListener: () => void;
@@ -60,6 +63,8 @@ export default function App() {
   const [transcription,     setTranscription]     = useState<string>('');
   const [clarifyQuestion,   setClarifyQuestion]   = useState<string>('');
   const [clarifyOptions,    setClarifyOptions]    = useState<string[]>([]);
+  const [isHotListening,    setIsHotListening]    = useState<boolean>(false);
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [messages,          setMessages]          = useState<ChatMessage[]>([
     {
       id: '0',
@@ -68,6 +73,7 @@ export default function App() {
       timestamp: new Date(),
     },
   ]);
+  const [systemStats,       setSystemStats]       = useState<any>(null);
 
   // ── IPC bridge: Python → Electron → React ────────────────────────────────
   useEffect(() => {
@@ -81,27 +87,45 @@ export default function App() {
 
       switch (msg.type) {
         case 'idle':
-          setOrbState('idle');
-          setStatusLabel(config.idleLabel);
-          setTranscription('');
-          setClarifyQuestion('');
-          setClarifyOptions([]);
+          // Debounce idle: short idle flashes (hot-window) shouldn't reset UI
+          if (idleTimer.current) clearTimeout(idleTimer.current);
+          idleTimer.current = setTimeout(() => {
+            setOrbState('idle');
+            setStatusLabel(config.idleLabel);
+            setIsHotListening(false);
+            setClarifyQuestion('');
+            setClarifyOptions([]);
+            // Keep transcription visible for 2s after going idle, then fade
+            setTimeout(() => setTranscription(''), 2000);
+          }, 300); // 300ms debounce — absorbs rapid idle→listening→idle flicker
           break;
 
         case 'wake':
+          if (idleTimer.current) clearTimeout(idleTimer.current);
           setOrbState('listening');
           setStatusLabel('LISTENING...');
+          setIsHotListening(false);
           setTranscription('');
           setClarifyQuestion('');
           setClarifyOptions([]);
           break;
 
         case 'listening':
-          setOrbState('listening');
-          setStatusLabel('LISTENING...');
+          if (idleTimer.current) clearTimeout(idleTimer.current);
+          // Distinguish hot-listen window (soft glow) from active wake listen
+          if (orbState === 'idle') {
+            // post-task hot window — subtle pulse, don't fully activate orb
+            setIsHotListening(true);
+            setStatusLabel('READY FOR MORE...');
+          } else {
+            setOrbState('listening');
+            setStatusLabel('LISTENING...');
+          }
           break;
 
         case 'transcript':
+          if (idleTimer.current) clearTimeout(idleTimer.current);
+          setIsHotListening(false);
           setOrbState('processing');
           setStatusLabel('UNDERSTANDING...');
           setTranscription(msg.text || '');
@@ -116,12 +140,28 @@ export default function App() {
           break;
 
         case 'processing':
+          if (idleTimer.current) clearTimeout(idleTimer.current);
           setOrbState('processing');
           setStatusLabel('THINKING...');
           break;
 
+        case 'loading':
+          // Tool in progress — show in status and add a subtle chat indicator
+          if (idleTimer.current) clearTimeout(idleTimer.current);
+          setOrbState('processing');
+          setStatusLabel(msg.text?.toUpperCase() || 'LOADING...');
+          break;
+
         case 'speaking':
+          // Just an orb state change — the actual text comes via 'response'
+          if (idleTimer.current) clearTimeout(idleTimer.current);
+          setOrbState('speaking');
+          setStatusLabel('RESPONDING');
+          break;
+
         case 'response':
+          // This carries the actual text bubble
+          if (idleTimer.current) clearTimeout(idleTimer.current);
           setOrbState('speaking');
           setStatusLabel('RESPONDING');
           if (msg.text) {
@@ -135,6 +175,7 @@ export default function App() {
           break;
 
         case 'clarify':
+          if (idleTimer.current) clearTimeout(idleTimer.current);
           setOrbState('processing');
           setStatusLabel('NEEDS YOUR INPUT');
           setClarifyQuestion(msg.question || 'Which one?');
@@ -143,6 +184,7 @@ export default function App() {
           break;
 
         case 'error':
+          if (idleTimer.current) clearTimeout(idleTimer.current);
           setOrbState('idle');
           setStatusLabel('ERROR');
           if (msg.text) {
@@ -154,15 +196,27 @@ export default function App() {
             }]);
           }
           break;
-
-        case 'loading':
-          setOrbState('processing');
-          setStatusLabel(msg.text?.toUpperCase() || 'LOADING...');
+        case 'status':
+          if (msg.data) {
+            setSystemStats(msg.data);
+          }
           break;
       }
     });
 
-    return () => window.yukiAPI?.removeStateListener();
+    return () => {
+      window.yukiAPI?.removeStateListener();
+      if (idleTimer.current) clearTimeout(idleTimer.current);
+    };
+  }, []);
+
+  // Tell Python the UI is now fully mounted and ready to receive standard payloads
+  useEffect(() => {
+    // A tiny timeout ensures initial frame paints are complete
+    const tid = setTimeout(() => {
+      window.yukiAPI?.sendUIReady?.();
+    }, 500);
+    return () => clearTimeout(tid);
   }, []);
 
   // ── History loading/saving ───────────────────────────────────────────────
@@ -182,9 +236,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // Save on every message change, ignore the first default greeting if it's the only one
+    // Save history with a small debounce to prevent rapid-fire writes
     if (window.yukiAPI && messages.length > 0) {
-      window.yukiAPI.saveHistory(messages);
+      const timer = setTimeout(() => {
+        window.yukiAPI?.saveHistory(messages);
+      }, 500);
+      return () => clearTimeout(timer);
     }
   }, [messages]);
 
@@ -250,12 +307,14 @@ export default function App() {
       case 'listen':
         return (
           <AgentView
+            viewMode={currentPage === 'chat' ? 'chat' : 'voice'}
             orbState={orbState}
             statusLabel={statusLabel}
             transcription={transcription}
             messages={messages}
             clarifyQuestion={clarifyQuestion}
             clarifyOptions={clarifyOptions}
+            isHotListening={isHotListening}
             onTrigger={handleTrigger}
             onSendMessage={handleSendMessage}
             onChoice={handleChoice}
@@ -265,6 +324,8 @@ export default function App() {
         return <History messages={messages} />;
       case 'settings':
         return <Settings />;
+      case 'dashboard':
+        return <Dashboard stats={systemStats} />;
       default:
         return null;
     }
@@ -292,6 +353,7 @@ export default function App() {
       <TopNavBar 
         activePage={currentPage} 
         onNavigate={navigateTo} 
+        stats={systemStats}
         onMiniToggle={() => {
           setIsMiniMode(true);
           window.yukiAPI?.setMode?.('mini');

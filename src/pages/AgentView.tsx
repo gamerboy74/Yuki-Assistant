@@ -6,16 +6,65 @@
  * Chat is secondary, revealed below.
  */
 
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, memo } from 'react';
 import type { OrbState, ChatMessage } from '../App';
 
+/* ── Sub-components for performance ───────────────────────────────────────── */
+
+const MessageThread = memo(({ messages, colorPrimary, orbState }: { messages: ChatMessage[], colorPrimary: string, orbState: OrbState }) => {
+  return (
+    <div className="max-w-2xl mx-auto space-y-6">
+      {messages.map((msg) => (
+        <div
+          key={msg.id}
+          className={`flex flex-col gap-1 animate-fade-in ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+        >
+          {msg.role === 'user' ? (
+            <div className="max-w-[75%] px-4 py-2.5 rounded-2xl rounded-br-sm bg-surface-container-high text-on-surface text-sm font-light">
+              {msg.text}
+            </div>
+          ) : (
+            <div className="max-w-[75%] flex gap-2.5 items-start">
+              <div
+                className="w-1.5 h-1.5 rounded-full mt-2 flex-shrink-0"
+                style={{ background: colorPrimary }}
+              />
+              <p className="text-on-surface text-sm font-light leading-relaxed">
+                {msg.text}
+              </p>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {/* Processing dots in chat */}
+      {orbState === 'processing' && (
+        <div className="flex items-start gap-2.5 animate-fade-in">
+          <div className="w-1.5 h-1.5 rounded-full mt-2.5 opacity-50" style={{ background: colorPrimary }} />
+          <div className="flex gap-1.5 items-center pt-1">
+            {[0, 150, 300].map(delay => (
+              <div
+                key={delay}
+                className="w-2 h-2 rounded-full animate-bounce"
+                style={{ background: colorPrimary, opacity: 0.6, animationDelay: `${delay}ms` }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
 interface AgentViewProps {
+  viewMode:        'chat' | 'voice';
   orbState:        OrbState;
   statusLabel:     string;
   transcription:   string;
   messages:        ChatMessage[];
   clarifyQuestion: string;
   clarifyOptions:  string[];
+  isHotListening:  boolean;
   onTrigger:       () => void;
   onSendMessage:   (text: string) => void;
   onChoice:        (choice: string) => void;
@@ -76,20 +125,36 @@ const ICON_MAP = {
 };
 
 export default function AgentView({
+  viewMode,
   orbState,
   statusLabel,
   transcription,
   messages,
   clarifyQuestion,
   clarifyOptions,
+  isHotListening,
   onTrigger,
   onSendMessage,
   onChoice,
 }: AgentViewProps) {
   const [inputText,    setInputText]    = useState('');
-  const [showChat,     setShowChat]     = useState(false);
+  const [showChat,     setShowChat]     = useState(true);
   const [lastResponse, setLastResponse] = useState('');
+  const [greeting,     setGreeting]     = useState('Hello');
   const threadRef = useRef<HTMLDivElement>(null);
+
+  // Sync showChat with viewMode when it changes
+  useEffect(() => {
+    setShowChat(viewMode === 'chat');
+  }, [viewMode]);
+
+  // Time-based greeting
+  useEffect(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) setGreeting('Good morning');
+    else if (hour < 18) setGreeting('Good afternoon');
+    else setGreeting('Good evening');
+  }, []);
 
   const color   = STATE_COLORS[orbState];
   const cfg     = STATE_CONFIG[orbState];
@@ -98,7 +163,10 @@ export default function AgentView({
   // Track last assistant message for the main display
   useEffect(() => {
     const last = [...messages].reverse().find(m => m.role === 'assistant');
-    if (last && orbState === 'speaking') setLastResponse(last.text);
+    if (last && orbState === 'speaking') {
+      setLastResponse(last.text);
+      setShowChat(true); // Auto-reveal chat when Yuki responds
+    }
   }, [messages, orbState]);
 
   // Auto-scroll chat
@@ -138,10 +206,33 @@ export default function AgentView({
       {/* ── Dot-grid texture ──────────────────────────────────────────────── */}
       <div className="absolute inset-0 pointer-events-none dot-grid opacity-[0.025]" />
 
+      {/* ── Ambient Floating Particles ──────────────────────────────────────  */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        {Array.from({ length: 12 }).map((_, i) => (
+          <div
+            key={i}
+            className="absolute rounded-full bg-primary/10 animate-float blur-sm"
+            style={{
+              width: Math.random() * 4 + 2,
+              height: Math.random() * 4 + 2,
+              left: `${Math.random() * 100}%`,
+              top: `${Math.random() * 100}%`,
+              animationDelay: `${Math.random() * 5}s`,
+              animationDuration: `${Math.random() * 10 + 10}s`,
+            }}
+          />
+        ))}
+      </div>
+
       {/* ══ MAIN ORB ZONE ═════════════════════════════════════════════════  */}
       <div
-        className={`flex-1 flex flex-col items-center justify-center transition-all duration-700 ${showChat ? 'pt-4' : 'pt-0'}`}
-        style={{ minHeight: showChat ? '45%' : '65%' }}
+        className={`flex-1 flex flex-col items-center justify-center transition-all duration-700 ease-out-expo ${
+          viewMode === 'chat' ? 'pt-2 pb-2' : (showChat ? 'pt-4' : 'pt-0')
+        }`}
+        style={{ 
+          minHeight: viewMode === 'chat' ? '180px' : (showChat ? '45%' : '65%'),
+          maxHeight: viewMode === 'chat' ? '240px' : 'none'
+        }}
       >
 
         {/* ── Outer decorative rings ───────────────────────────────────────  */}
@@ -151,7 +242,8 @@ export default function AgentView({
           <div
             className={`absolute rounded-full border border-current transition-all duration-1000 ease-out`}
             style={{
-              width: 380, height: 380,
+              width: viewMode === 'chat' ? 240 : 380, 
+              height: viewMode === 'chat' ? 240 : 380,
               color: color.primary,
               opacity: 0,
               ...(orbState === 'listening'  && { opacity: 0.08, transform: 'scale(1.05)' }),
@@ -163,7 +255,8 @@ export default function AgentView({
           <div
             className="absolute rounded-full border transition-all duration-700 ease-out"
             style={{
-              width: 300, height: 300,
+              width: viewMode === 'chat' ? 180 : 300, 
+              height: viewMode === 'chat' ? 180 : 300,
               borderColor: color.primary,
               opacity: isActive ? 0.18 : 0.06,
               transform: isActive ? 'scale(1.04)' : 'scale(1)',
@@ -174,7 +267,8 @@ export default function AgentView({
           <div
             className="absolute rounded-full border-2 transition-all duration-500 ease-out"
             style={{
-              width: 234, height: 234,
+              width: viewMode === 'chat' ? 140 : 234, 
+              height: viewMode === 'chat' ? 140 : 234,
               borderColor: color.primary,
               opacity: isActive ? 0.45 : 0.12,
               transform: isActive ? 'scale(1.02)' : 'scale(1)',
@@ -184,8 +278,10 @@ export default function AgentView({
           {/* ── The Orb ────────────────────────────────────────────────────  */}
           <button
             onClick={onTrigger}
-            className="relative w-52 h-52 rounded-full flex items-center justify-center cursor-pointer transition-all duration-500 focus:outline-none group"
+            className="relative rounded-full flex items-center justify-center cursor-pointer transition-all duration-500 focus:outline-none group overflow-hidden"
             style={{
+              width: viewMode === 'chat' ? 100 : 208, // Adjusted from 208 (52*4) to 100
+              height: viewMode === 'chat' ? 100 : 208,
               background: `radial-gradient(circle at 35% 35%, ${color.primary}22 0%, ${color.primary}08 50%, transparent 70%)`,
               border: `1px solid ${color.primary}30`,
               boxShadow: isActive
@@ -222,7 +318,7 @@ export default function AgentView({
             <span
               className="relative z-10 material-symbols-outlined transition-all duration-300"
               style={{
-                fontSize: 52,
+                fontSize: viewMode === 'chat' ? 32 : 52,
                 color: color.primary,
                 fontVariationSettings: "'FILL' 1",
                 filter: `drop-shadow(0 0 12px ${color.primary}90)`,
@@ -240,13 +336,14 @@ export default function AgentView({
         </div>
 
         {/* ── Waveform visualizer bars ──────────────────────────────────────  */}
-        <div
-          className="flex items-end justify-center mt-10 transition-all duration-500 gap-[3px]"
-          style={{
-            height: 52,
-            opacity: isActive ? 1 : 0.2,
-          }}
-        >
+        {viewMode !== 'chat' && (
+          <div
+            className="flex items-end justify-center mt-10 transition-all duration-500 gap-[3px]"
+            style={{
+              height: 52,
+              opacity: isActive ? 1 : 0.2,
+            }}
+          >
           {Array.from({ length: BAR_COUNT }).map((_, i) => {
             const center   = BAR_COUNT / 2;
             const dist     = Math.abs(i - center) / center;
@@ -279,13 +376,14 @@ export default function AgentView({
             );
           })}
         </div>
+        )}
 
         {/* ── Status label ─────────────────────────────────────────────────  */}
         <div
-          className="mt-6 font-label text-xs tracking-[0.25em] uppercase transition-all duration-500"
-          style={{ color: color.primary, opacity: isActive ? 1 : 0.35 }}
+          className={`${viewMode === 'chat' ? 'mt-2' : 'mt-6'} font-label text-xs tracking-[0.25em] uppercase transition-all duration-500`}
+          style={{ color: isHotListening ? '#8ff5ff' : color.primary, opacity: isActive || isHotListening ? 1 : 0.35 }}
         >
-          {statusLabel}
+          {isHotListening ? 'READY FOR MORE...' : orbState === 'idle' ? `${greeting}, Boss` : statusLabel}
         </div>
 
         {/* ── Live transcript (what Yuki heard) ────────────────────────────  */}
@@ -350,49 +448,10 @@ export default function AgentView({
       {showChat && (
         <div
           ref={threadRef}
-          className="flex-1 overflow-y-auto px-8 pt-4 pb-28 subtle-scrollbar border-t border-outline-variant/10 animate-slide-up"
-          style={{ maxHeight: '45%' }}
+          className={`flex-1 overflow-y-auto px-8 pt-4 pb-28 subtle-scrollbar border-t border-outline-variant/10 animate-slide-up bg-black/20`}
+          style={{ maxHeight: viewMode === 'chat' ? 'none' : '45%' }}
         >
-          <div className="max-w-2xl mx-auto space-y-6">
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex flex-col gap-1 animate-fade-in ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
-              >
-                {msg.role === 'user' ? (
-                  <div className="max-w-[75%] px-4 py-2.5 rounded-2xl rounded-br-sm bg-surface-container-high text-on-surface text-sm font-light">
-                    {msg.text}
-                  </div>
-                ) : (
-                  <div className="max-w-[75%] flex gap-2.5 items-start">
-                    <div
-                      className="w-1.5 h-1.5 rounded-full mt-2 flex-shrink-0"
-                      style={{ background: color.primary }}
-                    />
-                    <p className="text-on-surface text-sm font-light leading-relaxed">
-                      {msg.text}
-                    </p>
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {/* Processing dots in chat */}
-            {orbState === 'processing' && (
-              <div className="flex items-start gap-2.5 animate-fade-in">
-                <div className="w-1.5 h-1.5 rounded-full mt-2.5 opacity-50" style={{ background: color.primary }} />
-                <div className="flex gap-1.5 items-center pt-1">
-                  {[0, 150, 300].map(delay => (
-                    <div
-                      key={delay}
-                      className="w-2 h-2 rounded-full animate-bounce"
-                      style={{ background: color.primary, opacity: 0.6, animationDelay: `${delay}ms` }}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          <MessageThread messages={messages} colorPrimary={color.primary} orbState={orbState} />
         </div>
       )}
 

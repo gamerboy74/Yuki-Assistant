@@ -7,10 +7,11 @@ interface SideNavBarProps {
 }
 
 const NAV_ITEMS = [
-  { id: 'listen',   icon: 'mic',          label: 'Listen' },
-  { id: 'chat',     icon: 'chat_bubble',  label: 'Chat',  iconFill: true },
-  { id: 'history',  icon: 'history',      label: 'Time' },
-  { id: 'settings', icon: 'tune',         label: 'Tune' },
+  { id: 'dashboard',icon: 'grid_view',     label: 'Core' },
+  { id: 'listen',   icon: 'mic',           label: 'Listen' },
+  { id: 'chat',     icon: 'chat_bubble',   label: 'Chat',  iconFill: true },
+  { id: 'history',  icon: 'history',       label: 'Time' },
+  { id: 'settings', icon: 'tune',          label: 'Tune' },
 ];
 
 export default function SideNavBar({ activePage, onNavigate, onTrigger }: SideNavBarProps) {

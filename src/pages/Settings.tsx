@@ -62,7 +62,7 @@ export default function Settings() {
           Voice <span className="text-primary font-medium">Settings</span>
         </h1>
         <p className="text-on-surface-variant font-body tracking-wider text-sm max-w-xl">
-          Configure Yuki's voice, recognition model, and behaviour. Changes take effect on next restart.
+          Configure Yuki's voice, recognition model, and behaviour. Changes take effect immediately.
         </p>
       </header>
 

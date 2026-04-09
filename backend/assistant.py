@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 # Load .env file (for OPENAI_API_KEY etc.)
 # backend/assistant.py is one level below the project root
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"), override=True)
 
 # Add the project root to sys.path so "from backend.*" imports resolve
 if PROJECT_ROOT not in sys.path:
@@ -46,6 +46,8 @@ from backend.brain import process as brain_process
 from backend.executor import execute
 from backend import intent_router
 from backend import memory as mem
+from backend.proactive_agent import ProactiveAgent
+from backend.utils.monitoring import get_system_stats
 
 logger = get_logger(__name__)
 
@@ -53,7 +55,9 @@ logger = get_logger(__name__)
 _choice_queue: queue.Queue       = queue.Queue()
 _text_input_queue: queue.Queue   = queue.Queue()  # Typed messages from chat UI
 _manual_trigger_event = threading.Event()
+_interrupt_listen_event = threading.Event()
 _stop_event = threading.Event()
+_ui_ready_event = threading.Event()
 
 
 # ── IPC helpers ───────────────────────────────────────────────────────────────
@@ -78,25 +82,36 @@ def _stdin_reader():
             data = json.loads(line)
             msg_type = data.get("type", "")
 
-            if msg_type == "choice":
+            if msg_type == "ui_ready":
+                _ui_ready_event.set()
+
+            elif msg_type == "choice":
                 _choice_queue.put(data.get("value", ""))
+                _interrupt_listen_event.set()
                 logger.info(f"Received choice: {data.get('value')}")
 
             elif msg_type == "manual_trigger":
                 _manual_trigger_event.set()
+                _interrupt_listen_event.set()
                 logger.info("Manual trigger received from Electron")
 
             elif msg_type == "text_input":
                 text = data.get("value", "").strip()
                 if text.startswith("__settings__:"):
-                    payload_str = text[13:] # strip prefix
-                    _update_settings(payload_str)
+                    # We'll need the wake_detector instance, which is in the run() scope.
+                    # For now, put it in a temporary storage if the thread hasn't started run()
+                    # or handle it via a callback if we want to be clean.
+                    # Easiest: save to a global or just let it update cfg.
+                    payload_str = text[13:]
+                    # If run() has started, we can pass the detector. 
+                    # But wake_detector is a local. Let's make it a global or reachable.
+                    _text_input_queue.put(text)
                 elif text == "forget everything":
                     mem.clear_all()
                     logger.info("Purged all memory via GUI")
-                    # Optionally speak confirmation if it wasn't triggered silently
                 elif text:
                     _text_input_queue.put(text)
+                    _interrupt_listen_event.set()
                     logger.info(f"Text input received: {text!r}")
 
             elif msg_type == "stop":
@@ -107,7 +122,7 @@ def _stdin_reader():
             logger.debug(f"Invalid stdin JSON: {line!r}")
 
 
-def _update_settings(payload_str: str):
+def _update_settings(payload_str: str, wake_detector: WakeWordDetector = None):
     """Parse GUI settings payload and update live parameters + save to yuki.config.json."""
     try:
         new_cfg = json.loads(payload_str)
@@ -121,6 +136,13 @@ def _update_settings(payload_str: str):
         cfg.setdefault("router", {})
         cfg["router"]["enabled"]            = new_cfg.get("router_enabled", True)
         
+        # New: Wake word sensitivity
+        sensitivity = new_cfg.get("wake_word_sensitivity", 0.7)
+        cfg["assistant"]["wake_word_sensitivity"] = sensitivity
+        if wake_detector:
+            wake_detector.sensitivity = float(sensitivity)
+            logger.info(f"Live sensitivity updated to {sensitivity}")
+
         # Update live environment variables if needed
         os.environ["OLLAMA_BASE_URL"] = new_cfg.get("ollama_url", "http://localhost:11434")
 
@@ -182,15 +204,8 @@ def _handle_memory_intent(transcript: str) -> str | None:
     return None  # No memory pattern matched — let the LLM handle it
 
 
-def _prewarm_whisper():
-    """Load the Whisper model before the main loop so first recognition is fast."""
-    try:
-        from backend.speech.recognition import _get_whisper
-        send({"type": "loading", "text": "Loading speech model..."})
-        _get_whisper()
-        logger.info("Whisper model pre-warmed.")
-    except Exception as e:
-        logger.warning(f"Whisper pre-warm failed: {e}")
+# Removed _prewarm_whisper to prevent GIL blocking on startup.
+# Model will be lazy-loaded on the very first voice command instead.
 
 
 def run():
@@ -204,34 +219,92 @@ def run():
     # Personalised greeting using stored preferences / user name
     _greeting = mem.get_greeting() or cfg["assistant"]["greeting"]
 
+    logger.info("Step 1: Initializing threads...")
     # Start stdin reader thread
     stdin_thread = threading.Thread(target=_stdin_reader, daemon=True)
     stdin_thread.start()
 
-    # Pre-warm the Whisper model so first recognition is fast
-    _prewarm_whisper()
+    # Start system monitoring thread
+    monitor_thread = threading.Thread(target=_monitor_loop, daemon=True)
+    monitor_thread.start()
 
-    send({"type": "idle"})
-    speak(_greeting)
+    logger.info("Step 2: Skipped pre-warming to maintain UI responsiveness...")
+    
+    logger.info("Step 3: App warmup delay...")
+    logger.info(f"Step 3: Greeting user with: {_greeting}")
+    # Run the greeting in a background thread so the main loop starts instantly
+    # and the UI doesn't freeze while waiting for TTS generation or playback
+    _silent_wake_event = threading.Event()
 
-    logger.info("Yuki is running. Waiting for wake word...")
+    def _startup_greeting():
+        # Unlock the UI instantly by setting it to idle
+        send({"type": "idle"})
+        
+        # Wait until React completes its fade-in animation and sends the explicit "ui_ready" IPC event.
+        # This guarantees deterministic timing regardless of CPU load.
+        _ui_ready_event.wait(timeout=10.0)
+
+        send({"type": "speaking"})
+        send({"type": "response", "text": _greeting})
+        speak(_greeting)
+        
+        # Automatically transition into listening mode after the morning briefing
+        if not _manual_trigger_event.is_set() and not _stop_event.is_set():
+            _silent_wake_event.set()
+
+    threading.Thread(target=_startup_greeting, daemon=True).start()
+
+    logger.info("Step 5: Initialization complete. Entering main loop...")
+
+    _proactive = ProactiveAgent(speak_fn=speak, send_fn=send)
+    _proactive.start()
+
+    # After completing a task, stay hot for this many seconds (no wake word needed)
+    HOT_WINDOW_SECS = 6
+    _hot_transcript: str | None = None  # Pre-loaded follow-up from hot window
+
+    # Random witty wake acknowledgements (replaces the bland 'Yes?')
+    import random
+    _WAKE_ACKS = [
+        "Yes?",
+        "Hmm?",
+        "Go ahead.",
+        "What's up?",
+        "I'm listening.",
+        "Yeah, boss?",
+        "Ready.",
+        "On it — what do you need?",
+    ]
 
     while not _stop_event.is_set():
         try:
             # ── 1. Wait for wake word or manual trigger ──────────────────────
             send({"type": "idle"})
-            _manual_trigger_event.clear()
 
             triggered = False
             text_from_ui = None
+            is_silent_wake = False
 
-            # Check for typed message first (instant — no audio needed)
-            try:
-                text_from_ui = _text_input_queue.get_nowait()
+            # ── Hot window shortcut: skip wake detection if follow-up already queued ──
+            if _hot_transcript:
                 triggered = True
-                logger.info(f"Processing text input directly: {text_from_ui!r}")
-            except queue.Empty:
-                pass
+                transcript = _hot_transcript
+                _hot_transcript = None
+                send({"type": "wake"})
+                send({"type": "transcript", "text": transcript})
+                send({"type": "processing"})
+                result = intent_router.route(transcript)
+                if result is None:
+                    result = brain_process(transcript)
+            else:
+                # Check for typed message first (instant — no audio needed)
+                try:
+                    text_from_ui = _text_input_queue.get_nowait()
+                    triggered = True
+                    logger.info(f"Processing text input directly: {text_from_ui!r}")
+                except queue.Empty:
+                    pass
+                result = None  # will be set below after wake/transcribe
 
             if not triggered:
                 # Start wake word detection in a background thread so we can also
@@ -249,14 +322,29 @@ def run():
                     if _manual_trigger_event.is_set():
                         # Cancel the background audio thread before proceeding
                         wake_detector.stop()
+                        _manual_trigger_event.clear()
                         triggered = True
                         break
                     if wake_result.is_set():
+                        wake_result.clear()
                         triggered = True
                         break
+
+                    if _silent_wake_event.is_set():
+                        _silent_wake_event.clear()
+                        wake_detector.stop() # Cancel background listening
+                        triggered = True
+                        is_silent_wake = True
+                        break
+
                     # Also check for typed messages while waiting for wake word
                     try:
                         text_from_ui = _text_input_queue.get_nowait()
+                        if text_from_ui.startswith("__settings__:"):
+                            _update_settings(text_from_ui[13:], wake_detector)
+                            text_from_ui = None
+                            continue # Keep waiting for wake after settings update
+                        
                         wake_detector.stop()
                         triggered = True
                         break
@@ -264,42 +352,54 @@ def run():
                         pass
                     time.sleep(0.1)
 
-            if not triggered or _stop_event.is_set():
-                # Also cancel any still-running wake thread on global stop
-                wake_detector.stop()
-                continue
-
-            # ── 2. Signal wake ───────────────────────────────────────────────
-            send({"type": "wake"})
-
-            # ── 3. Record + transcribe ───────────────────────────────────────
-            if text_from_ui:
-                # Typed input — skip TTS "Yes?" and audio recording, UI already appended it
-                transcript = text_from_ui
-                # send({"type": "transcript", "text": transcript}) # Removed to prevent double bubble
-
-            else:
-                speak("Yes?")
-                send({"type": "listening"})
-                transcript = recognize_speech(timeout=6.0)
-
-                if not transcript:
-                    send({"type": "idle"})
-                    speak("I didn't catch that. Try again.")
+            if result is None:
+                if not triggered or _stop_event.is_set():
+                    # Also cancel any still-running wake thread on global stop
+                    wake_detector.stop()
                     continue
 
-                # Run local Gemma STT correction only when mishear patterns are present
-                transcript = correct_transcript(transcript)
+                # ── 2. Signal wake ───────────────────────────────────────────────
+                send({"type": "wake"})
 
-                send({"type": "transcript", "text": transcript})
+                # ── 3. Record + transcribe ───────────────────────────────────────
+                if text_from_ui:
+                    transcript = text_from_ui
 
-            # ── 4. Fast-path intent router (no LLM needed) ───────────────────
-            send({"type": "processing"})
-            result = intent_router.route(transcript)
+                else:
+                    if not is_silent_wake:
+                        speak(random.choice(_WAKE_ACKS))
+                    send({"type": "listening"})
+                    _interrupt_listen_event.clear()
+                    transcript = recognize_speech(timeout=6.0, interrupt_event=_interrupt_listen_event)
 
-            # ── 5. Fallback: AI brain if router didn't match ──────────────────
-            if result is None:
-                result = brain_process(transcript)
+                    if not transcript:
+                        # If recognition was interrupted by a manual click, just go idle silently
+                        if _manual_trigger_event.is_set():
+                            _manual_trigger_event.clear()
+                            send({"type": "idle"})
+                            continue
+
+                        # Otherwise check if there's a typed message waiting
+                        try:
+                            transcript = _text_input_queue.get_nowait()
+                        except queue.Empty:
+                            pass
+
+                    if not transcript:
+                        send({"type": "idle"})
+                        speak("I didn't catch that.")
+                        continue
+
+                    transcript = correct_transcript(transcript)
+                    send({"type": "transcript", "text": transcript})
+
+                # ── 4. Fast-path intent router (no LLM needed) ───────────────────
+                send({"type": "processing"})
+                result = intent_router.route(transcript)
+
+                # ── 5. Fallback: AI brain if router didn't match ──────────────────
+                if result is None:
+                    result = brain_process(transcript)
 
             # ── 6. Clarification / Follow-up flow ─────────────────────────────
             while result.get("needs_clarify"):
@@ -315,19 +415,38 @@ def run():
                 speak(question)
 
                 send({"type": "listening"})
-                clarify_transcript = recognize_speech(timeout=8.0)
+                _interrupt_listen_event.clear()
+                clarify_transcript = recognize_speech(timeout=8.0, interrupt_event=_interrupt_listen_event)
                 
-                # Check if user clicked a UI option quickly while it was listening
+                user_reply = None
                 try:
-                    ui_choice = _choice_queue.get_nowait()
+                    user_reply = _choice_queue.get_nowait()
                 except queue.Empty:
-                    ui_choice = None
+                    user_reply = clarify_transcript
 
-                user_reply = ui_choice if ui_choice else clarify_transcript
+                # If still no reply, check the typed text queue
+                if not user_reply:
+                    try:
+                        tr = _text_input_queue.get_nowait()
+                        if tr.startswith("__settings__"):
+                            _update_settings(tr[13:], wake_detector)
+                        else:
+                            user_reply = tr
+                            _interrupt_listen_event.set()
+                    except queue.Empty:
+                        pass
 
                 if not user_reply:
+                    if _manual_trigger_event.is_set():
+                        _manual_trigger_event.clear()
+                        send({"type": "idle"})
+                        break
                     speak("I didn't catch that. Let me know when you're ready.")
                     break
+
+                # Clear result response so it doesn't speak again in Step 9
+                if result.get("response") == question:
+                    result["response"] = None
 
                 logger.info(f"User follow-up: {user_reply!r}")
                 send({"type": "transcript", "text": user_reply})
@@ -338,12 +457,18 @@ def run():
             # ── 7. Memory fast-path (intercept before executor) ───────────────
             override_response = _handle_memory_intent(transcript) or None
 
-            # ── 8. Execute OS action (skip if memory already handled it) ──────
+            # ── 8. Execute action (fast-router results only) ──────────────────
+            # Brain results (from the agentic loop) already executed tools
+            # internally — they arrive here as a final response string.
+            # Only fast-router results have an "action" that needs executing.
             if override_response is None:
                 action = result.get("action") or {"type": "none", "params": {}}
-                override_response = execute(action)
+                if action.get("type") not in ("none", None):
+                    res = execute(action)
+                    if res:
+                        override_response = res
 
-            # ── 8. Speak response ─────────────────────────────────────────────
+            # ── 9. Speak response ─────────────────────────────────────────────
             if isinstance(override_response, dict):
                 speak_text = override_response.get("speak", "")
                 ui_text = override_response.get("ui_log", "") or speak_text
@@ -351,26 +476,55 @@ def run():
                     send({"type": "speaking"})
                     send({"type": "response", "text": ui_text})
                     if speak_text:
-                        speak_async(speak_text)
+                        speak(speak_text)
             else:
                 response_text = override_response or result.get("response") or ""
                 if response_text:
                     send({"type": "speaking"})
                     send({"type": "response", "text": response_text})
-                    speak_async(response_text)
+                    speak(response_text)
 
             send({"type": "idle"})
 
+            # ── 10. Hot-listen window ─────────────────────────────────────────
+            # Stay alert for HOT_WINDOW_SECS after every task.
+            # If user speaks again, skip next wake-word cycle entirely.
+            send({"type": "listening"})
+            _interrupt_listen_event.clear()
+            hot_follow_up = recognize_speech(timeout=HOT_WINDOW_SECS, interrupt_event=_interrupt_listen_event)
+            send({"type": "idle"})
+            
+            # If user clicked to cancel during hot window, just stop
+            if _manual_trigger_event.is_set():
+                _manual_trigger_event.clear()
+                _hot_transcript = None
+            elif hot_follow_up:
+                logger.info(f"[HOT] Follow-up: {hot_follow_up!r}")
+                _hot_transcript = correct_transcript(hot_follow_up)
+            else:
+                logger.info("[HOT] Silent — going to sleep.")
+                _hot_transcript = None
+
         except KeyboardInterrupt:
             logger.info("KeyboardInterrupt — shutting down")
+            _proactive.stop()
             break
         except Exception as e:
             logger.error(f"Main loop error: {e}")
             send({"type": "idle"})
             time.sleep(1)
 
-    logger.info("Yuki stopped.")
-    send({"type": "idle"})
+    _proactive.stop()
+
+def _monitor_loop():
+    """Background thread to periodically send system stats to Electron."""
+    while not _stop_event.is_set():
+        try:
+            stats = get_system_stats()
+            send({"type": "status", "data": stats})
+        except Exception as e:
+            logger.error(f"Monitoring error: {e}")
+        time.sleep(10) # Update every 10 seconds
 
 
 if __name__ == "__main__":

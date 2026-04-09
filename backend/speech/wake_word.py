@@ -10,6 +10,7 @@ import struct
 import tempfile
 import threading
 from backend.utils.logger import get_logger
+from backend.utils.audio_filters import AudioProcessor
 
 logger = get_logger(__name__)
 
@@ -20,7 +21,21 @@ PICOVOICE_KEY = os.environ.get("PICOVOICE_KEY", "")
 # picovoice, porcupine, terminator
 WAKE_KEYWORD = "porcupine"  # Change to "jarvis" if you prefer
 
+try:
+    import pvporcupine
+except ImportError:
+    pass
 
+try:
+    import pyaudio
+except ImportError:
+    pass
+
+try:
+    import vosk
+except ImportError:
+    pass
+    
 class WakeWordDetector:
     """
     Offline wake word detector using pvporcupine.
@@ -35,6 +50,10 @@ class WakeWordDetector:
         self._use_porcupine = False
         self._porcupine = None
         self._pa = None
+        # Audio processor for noise floor and speech detection
+        self.processor = AudioProcessor()
+        # Sensitivity 0.0 to 1.0 (default 0.7 for Vosk fallback)
+        self.sensitivity = float(os.environ.get("WAKE_WORD_SENSITIVITY", 0.7))
         # Cancellation event — set by stop() to break listening loops
         self._stop_event = threading.Event()
 
@@ -113,104 +132,93 @@ class WakeWordDetector:
 
     def _listen_stt(self) -> bool:
         """
-        Offline wake word detection using the project's local Whisper model.
-        Much faster and more reliable than Google STT — no internet needed.
+        Offline wake word detection using Vosk.
+        Extremely fast and lightweight streaming STT.
         """
-        import pyaudio
-        import wave
-        import struct
-        import numpy as np
+        import json
 
-        SAMPLE_RATE    = 16000
-        CHUNK          = 1024
-        RECORD_SECS    = 2.5     # listen in 2.5s windows
-        ENERGY_THRESH  = 200     # RMS threshold — below this = silence, skip transcription
-        FRAMES_PER_WIN = int(SAMPLE_RATE * RECORD_SECS / CHUNK)
+        if "vosk" not in globals() or "pyaudio" not in globals():
+            logger.error("Vosk or PyAudio not installed, cannot use STT fallback")
+            return False
+
+        # Set log level to -1 to disable verbose Kaldi logging
+        vosk.SetLogLevel(-1)
+
+        # Download the model automatically if not cached
+        logger.info("Loading Vosk wake word model (may download ~50MB on first run)...")
+        try:
+            model = vosk.Model(lang="en-us")
+        except Exception as e:
+            logger.error(f"Vosk failed to load model: {e}")
+            return False
+
+        logger.info(f"Vosk loading optimized grammar: {self.wake_words}")
+        # Restrict Vosk to only these words + [unk] catch-all for background noise
+        grammar_list = [w.lower() for w in self.wake_words]
+        grammar_list.append("[unk]")
+        grammar_json = json.dumps(grammar_list)
+
+        rec = vosk.KaldiRecognizer(model, 16000, grammar_json)
 
         pa = pyaudio.PyAudio()
         try:
             stream = pa.open(
                 format=pyaudio.paInt16,
                 channels=1,
-                rate=SAMPLE_RATE,
+                rate=16000,
                 input=True,
-                frames_per_buffer=CHUNK,
+                frames_per_buffer=1024, # Smaller buffer for snappier gating
             )
         except OSError as e:
             logger.error(f"Cannot open microphone for wake word: {e}")
             pa.terminate()
             return False
 
-        logger.info("Whisper wake word detector active — say 'Hey Yuki'...")
+        logger.info("Vosk wake word detector active — say 'Hey Yuki'...")
+        stream.start_stream()
 
         try:
             while not self._stop_event.is_set():
-                # Collect one window of audio
-                frames = []
-                for _ in range(FRAMES_PER_WIN):
-                    if self._stop_event.is_set():
-                        return False
-                    try:
-                        data = stream.read(CHUNK, exception_on_overflow=False)
-                        frames.append(data)
-                    except Exception:
-                        break
+                try:
+                    data = stream.read(512, exception_on_overflow=False)
+                except Exception:
+                    break
 
-                if not frames:
+                if len(data) == 0:
                     continue
 
-                # Quick energy gate — skip silent chunks to save Whisper calls
-                raw = b"".join(frames)
-                samples = struct.unpack(f"{len(raw)//2}h", raw)
-                rms = (sum(s * s for s in samples) / len(samples)) ** 0.5
-                if rms < ENERGY_THRESH:
-                    continue  # silence — don't bother transcribing
+                # 1. Update background noise floor (fans, etc.)
+                self.processor.update_noise_floor(data)
 
-                # Save to tmp WAV and run Whisper
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                    tmp_path = tmp.name
+                # 2. Gate the audio: Only send to Vosk if it's likely speech
+                if not self.processor.is_speech(data, sensitivity=self.sensitivity):
+                    continue
 
-                try:
-                    import wave as wav_mod
-                    with wav_mod.open(tmp_path, "wb") as wf:
-                        wf.setnchannels(1)
-                        wf.setsampwidth(2)
-                        wf.setframerate(SAMPLE_RATE)
-                        wf.writeframes(raw)
+                if rec.AcceptWaveform(data):
+                    res = json.loads(rec.Result())
+                    text = res.get("text", "").lower()
+                else:
+                    res = json.loads(rec.PartialResult())
+                    text = res.get("partial", "").lower()
 
-                    from backend.speech.recognition import _get_whisper
-                    model = _get_whisper()
-                    segments, _ = model.transcribe(
-                        tmp_path,
-                        language="en",
-                        beam_size=1,
-                        vad_filter=True,
-                    )
-                    text = " ".join(s.text for s in segments).lower().strip()
+                if not text:
+                    continue
 
-                    # Normalize common mishearings
-                    text = (text.replace("yuuki", "yuki")
-                                .replace("you key", "yuki")
-                                .replace("your key", "yuki")
-                                .replace("eu key", "yuki"))
+                # Normalize common mishearings
+                text = (text.replace("yuuki", "yuki")
+                            .replace("you key", "yuki")
+                            .replace("your key", "yuki")
+                            .replace("eu key", "yuki")
+                            .replace("uk", "yuki")
+                            .replace("new key", "yuki"))
 
-                    if text:
-                        logger.debug(f"Whisper heard: {text!r}")
+                for wake_word in self.wake_words:
+                    if wake_word in text:
+                        logger.info(f"[WAKE WORD] Vosk matched: '{wake_word}' in '{text}'")
+                        return True
 
-                    for wake_word in self.wake_words:
-                        if any(w in text for w in wake_word.split()):
-                            logger.info(f"Wake word matched: '{wake_word}' in '{text}'")
-                            return True
-
-                except Exception as e:
-                    logger.debug(f"Whisper wake transcription error: {e}")
-                finally:
-                    try:
-                        import os as _os
-                        _os.unlink(tmp_path)
-                    except Exception:
-                        pass
-
+        except Exception as e:
+            logger.error(f"Vosk streaming error: {e}")
         finally:
             stream.stop_stream()
             stream.close()

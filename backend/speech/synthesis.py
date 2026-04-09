@@ -10,6 +10,7 @@ import asyncio
 import os
 import tempfile
 import threading
+import uuid
 from backend.utils.logger import get_logger
 from backend.config import cfg
 
@@ -20,28 +21,37 @@ logger = get_logger(__name__)
 # ── Config ────────────────────────────────────────────────────────────────────
 ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
 ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "")
-EDGE_VOICE = os.environ.get("TTS_VOICE") or cfg["assistant"].get("tts_voice", "en-IN-NeerjaNeural")
+def _get_edge_voice():
+    return os.environ.get("TTS_VOICE") or cfg["assistant"].get("tts_voice", "en-IN-NeerjaNeural")
+
+# Safety: skip ElevenLabs for very long strings to avoid burning credits
+ELEVENLABS_CHAR_BUDGET = int(os.environ.get("ELEVENLABS_CHAR_BUDGET", "300"))
 
 # Shared lock — prevents overlapping TTS playback
 _speak_lock = threading.Lock()
 _pygame_initialized = False
 
 
-def _init_pygame():
-    global _pygame_initialized
-    if not _pygame_initialized:
-        try:
-            import pygame
-            pygame.mixer.init()
-            _pygame_initialized = True
-        except Exception as e:
-            logger.error(f"pygame init failed: {e}")
+# Pre-import pygame at top-level to prevent Windows OS Loader Lock deadlocks 
+# when starting concurrent threads later.
+try:
+    import pygame
+    pygame.mixer.init()
+    _pygame_initialized = True
+except Exception as e:
+    logger.error(f"pygame global init failed: {e}")
+    _pygame_initialized = False
 
+def _init_pygame():
+    pass # Already initialized globally
 
 def _play_audio_file(path: str):
     """Play an mp3/wav file via pygame and block until done."""
-    import pygame
-    _init_pygame()
+    global _pygame_initialized
+    if not _pygame_initialized:
+        logger.error("Cannot play audio: pygame not initialized")
+        return
+        
     pygame.mixer.music.load(path)
     pygame.mixer.music.play()
     while pygame.mixer.music.get_busy():
@@ -58,41 +68,46 @@ def _speak_elevenlabs(text: str, tmp_path: str) -> bool:
     """
     if not ELEVENLABS_API_KEY or not ELEVENLABS_VOICE_ID:
         return False
+
+    # ── Char-budget guard — avoid burning credits on long strings ──
+    if len(text) > ELEVENLABS_CHAR_BUDGET:
+        logger.warning(
+            f"ElevenLabs skipped: text length {len(text)} > budget {ELEVENLABS_CHAR_BUDGET}. "
+            "Falling back to edge-tts. Raise ELEVENLABS_CHAR_BUDGET env var to override."
+        )
+        return False
+
     try:
-        import urllib.request
-        import json
+        import requests  # pip install requests
 
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
-        payload = json.dumps({
+        payload = {
             "text": text,
             "model_id": "eleven_multilingual_v2",
             "voice_settings": {
                 "stability": 0.5,
-                "similarity_boost": 0.75
-            }
-        }).encode("utf-8")
-
-        req = urllib.request.Request(
-            url,
-            data=payload,
-            headers={
-                "xi-api-key": ELEVENLABS_API_KEY,
-                "Content-Type": "application/json",
-                "Accept": "audio/mpeg",
+                "similarity_boost": 0.75,
             },
-            method="POST",
-        )
+        }
+        headers = {
+            "xi-api-key": ELEVENLABS_API_KEY,
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg",
+        }
 
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            audio_data = resp.read()
+        # timeout=(5, 10) means 5s connect timeout, 10s read timeout
+        resp = requests.post(url, json=payload, headers=headers, timeout=(5, 10))
+        resp.raise_for_status()  # surfaces HTTP 4xx/5xx with readable message
+        audio_data = resp.content
 
         if len(audio_data) < 100:   # sanity check — empty response
+            logger.warning("ElevenLabs returned suspiciously small audio payload.")
             return False
 
         with open(tmp_path, "wb") as f:
             f.write(audio_data)
 
-        logger.info("ElevenLabs TTS ready.")
+        logger.info(f"ElevenLabs TTS ready ({len(audio_data):,} bytes).")
         return True
 
     except Exception as e:
@@ -110,7 +125,8 @@ async def _speak_edge_async(text: str, tmp_path: str) -> bool:
         return False
 
     is_hindi = any('\u0900' <= c <= '\u097F' for c in text)
-    voices = ["hi-IN-SwaraNeural", "hi-IN-MadhurNeural", EDGE_VOICE] if is_hindi else [EDGE_VOICE]
+    edge_v   = _get_edge_voice()
+    voices   = ["hi-IN-SwaraNeural", "hi-IN-MadhurNeural", edge_v] if is_hindi else [edge_v]
 
     for voice in voices:
         try:
@@ -138,8 +154,8 @@ async def _speak_async(text: str) -> None:
 
     _init_pygame()
 
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-        tmp_path = tmp.name
+    # UUID name → zero collision risk when speak_async fires multiple threads
+    tmp_path = os.path.join(tempfile.gettempdir(), f"yuki_tts_{uuid.uuid4().hex}.mp3")
 
     audio_ready = False
 
@@ -176,13 +192,27 @@ async def _speak_async(text: str) -> None:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def speak(text: str) -> None:
-    """Synchronous speak — blocks until done."""
-    if not text:
-        return
-    with _speak_lock:
-        asyncio.run(_speak_async(text))
+def _run_async_safe(coro):
+    """Run a coroutine safely regardless of whether a loop is already running."""
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
+
+def speak(text: str) -> None:
+    """Synchronous speak — blocks until done, but bails if TTS is stuck."""
+    if not text.strip():
+        return
+    # If another thread is stuck speaking, don't freeze the caller (main thread).
+    if not _speak_lock.acquire(timeout=1.0):
+        logger.warning(f"TTS lock busy, skipping speak: {text}")
+        return
+    try:
+        _run_async_safe(_speak_async(text))
+    finally:
+        _speak_lock.release()
 
 def speak_async(text: str) -> None:
     """Non-blocking speak — fires and forgets in a background thread."""
@@ -191,20 +221,13 @@ def speak_async(text: str) -> None:
 
     def _thread():
         with _speak_lock:
-            asyncio.run(_speak_async(text))
+            _run_async_safe(_speak_async(text))
 
     t = threading.Thread(target=_thread, daemon=True)
     t.start()
 
 
 def _fallback_speak(text: str) -> None:
-    """pyttsx3 fallback for fully offline use."""
-    try:
-        import pyttsx3
-        engine = pyttsx3.init()
-        engine.setProperty("rate", 165)
-        engine.say(text)
-        engine.runAndWait()
-    except Exception as e:
-        logger.error(f"Fallback TTS also failed: {e}")
-        print(f"[YUKI speaks]: {text}")
+    """Fallback if cloud TTS fails."""
+    logger.error(f"TTS failed completely. Could not speak: {text}")
+    print(f"[YUKI speaks]: {text}")

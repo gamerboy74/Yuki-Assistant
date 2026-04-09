@@ -4,8 +4,8 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
-  // Always dark — no toggle. Removes the need for class="dark" on <html>.
-  darkMode: false,
+  // Always dark — no toggle.
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {

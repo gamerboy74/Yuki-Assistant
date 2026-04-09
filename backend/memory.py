@@ -239,9 +239,11 @@ def context_block() -> str:
 
 def get_greeting() -> str:
     """
-    Return a personalized startup greeting using saved preferences.
-    Falls back to the generic config greeting if nothing is set.
+    Return a personalized, time-of-day aware, and friendly F.R.I.D.A.Y.-style greeting.
     """
+    import random
+    from datetime import datetime
+
     with _LOCK:
         user   = _store["user"]
         prefs  = user.get("preferences", {})
@@ -250,20 +252,56 @@ def get_greeting() -> str:
     name    = user.get("name", "")
     call_me = prefs.get("greeting_title", "")  # e.g. "boss", "sir"
 
-    # Check memories for a custom greeting instruction
+    # 1. Determine title/name preference
+    # Check memories for a custom greeting instruction override
     for m in reversed(mems):
         t = m["text"].lower()
         if "call me" in t or "greet me" in t or "wake up" in t:
-            # Found a custom greeting instruction — use the title from it
             for word in m["text"].split():
                 if word.lower() not in {"always", "call", "me", "when", "you", "wake",
                                         "up", "greet", "start", "please", "yuki"}:
                     call_me = word.strip(".,!")
                     break
 
-    if call_me:
-        return f"Ready, {call_me}."
-    elif name:
-        return f"Welcome back, {name}!"
+    target_name = call_me or name or "boss"
+
+    # 2. Determine time of day
+    hour = datetime.now().hour
+    if 5 <= hour < 12:
+        period = "morning"
+    elif 12 <= hour < 17:
+        period = "afternoon"
+    elif 17 <= hour < 22:
+        period = "evening"
     else:
-        return ""   # Caller will fall back to config greeting
+        period = "night"
+
+    # 3. F.R.I.D.A.Y. inspired friendly greeting banks
+    GREETINGS = {
+        "morning": [
+            f"Top of the morning to you, {target_name}. All systems are nominal.",
+            f"Good morning, {target_name}. I've run the diagnostics... we're ready to go.",
+            f"Morning, {target_name}! Hope you had a good rest. What's on the agenda?",
+            f"The sun is up and so am I. Ready when you are, {target_name}."
+        ],
+        "afternoon": [
+            f"Good afternoon, {target_name}. How is your day progressing?",
+            f"Afternoon, {target_name}. I'm synced and ready for your next command.",
+            f"Hello, {target_name}. Hope your afternoon is going smoothly.",
+            f"Systems online. Good to see you this afternoon, {target_name}."
+        ],
+        "evening": [
+            f"Good evening, {target_name}. Winding down, or just getting started?",
+            f"Evening, {target_name}. The day's almost done, but I'm still at 100%.",
+            f"Good to see you this evening, {target_name}. How can I help?",
+            f"Sunset is approaching, {target_name}. I'm here if you need anything."
+        ],
+        "night": [
+            f"Still working late, {target_name}? Don't forget to get some sleep.",
+            f"Night owl mode engaged. I'm with you as long as you need, {target_name}.",
+            f"It's getting late, {target_name}. All systems standing by.",
+            f"The world is quiet, but I'm wide awake for you, {target_name}."
+        ]
+    }
+
+    return random.choice(GREETINGS[period])
