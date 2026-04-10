@@ -43,6 +43,7 @@ except Exception as e:
     _mixer_ready = False
 
 _playback_stop_event = threading.Event()
+_last_playback_time = 0.0  # Unix timestamp of last audio completion
 
 def stop_speech():
     """Interrupt and stop current audio playback immediately (Barge-in)."""
@@ -77,15 +78,19 @@ def _play_audio_file(path: str):
     _playback_stop_event.clear()
     
     # ── Neural Pre-warm (150ms Silence Padding) ──
-    # This wakes up hardware/Bluetooth speakers before the actual speech starts.
-    try:
-        import numpy as np
-        # 44100Hz Stereo (2 channels)
-        pre_warm_samples = int(44100 * 0.15)
-        silence = np.zeros((pre_warm_samples, 2), dtype=np.int16)
-        pygame.mixer.Sound(buffer=silence).play()
-    except Exception as e:
-        logger.debug(f"Pre-warm failed: {e}")
+    # ONLY play if the gap since last speaking is large (> 1.0s).
+    # This prevents gaps between sentences in a multi-turn response.
+    now = time.time()
+    global _last_playback_time
+    if (now - _last_playback_time) > 1.0:
+        try:
+            import numpy as np
+            # 44100Hz Stereo (2 channels)
+            pre_warm_samples = int(44100 * 0.15)
+            silence = np.zeros((pre_warm_samples, 2), dtype=np.int16)
+            pygame.mixer.Sound(buffer=silence).play()
+        except Exception as e:
+            logger.debug(f"Pre-warm failed: {e}")
 
     pygame.mixer.music.load(path)
     pygame.mixer.music.play()
@@ -93,8 +98,9 @@ def _play_audio_file(path: str):
         if _playback_stop_event.is_set():
             pygame.mixer.music.stop()
             break
-        import time
-        time.sleep(0.05)
+        time.sleep(0.01) # Tightened from 0.05 for seamless handoffs
+    
+    _last_playback_time = time.time()
 
 
 # ── ElevenLabs ────────────────────────────────────────────────────────────────
