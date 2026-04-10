@@ -10,8 +10,46 @@ import datetime
 from pathlib import Path
 from typing import Optional, Union
 from backend.utils.logger import get_logger
+from backend import memory as mem
 
 logger = get_logger(__name__)
+
+def get_desktop_path() -> Path:
+    """Robustly resolve the Windows Desktop path."""
+    import winreg
+    try:
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            reg_path, _ = winreg.QueryValueEx(key, "Desktop")
+            return Path(os.path.expandvars(reg_path))
+    except Exception:
+        # Fallback to standard locations
+        home = Path(os.path.expanduser("~"))
+        for candidate in [home / "OneDrive" / "Desktop", home / "Desktop"]:
+            if candidate.exists():
+                return candidate
+        return home / "Desktop"
+
+def get_user_folder(folder_name: str) -> Path:
+    """Resolve standard user folders (Desktop, Downloads, Documents) robustly, handling OneDrive."""
+    import winreg
+    try:
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+        reg_names = {
+            "Desktop": "Desktop",
+            "Downloads": "{374DE290-123F-4565-9164-39C4925E467B}",
+            "Documents": "Personal"
+        }
+        reg_name = reg_names.get(folder_name, folder_name)
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            reg_path, _ = winreg.QueryValueEx(key, reg_name)
+            return Path(os.path.expandvars(reg_path))
+    except Exception:
+        home = Path(os.path.expanduser("~"))
+        for candidate in [home / "OneDrive" / folder_name, home / folder_name]:
+            if candidate.exists():
+                return candidate
+        return home / folder_name
 
 # Map of friendly app names to executable commands
 APP_MAP = {
@@ -130,12 +168,22 @@ def execute(action: dict) -> Union[str, dict, None]:
             return _set_brightness(params)
         elif atype == "get_weather":
             return _get_weather(params)
+        elif atype == "system_control":
+            return _system_control(params)
         elif atype == "clipboard_copy":
             return _clipboard_copy(params)
         elif atype == "reminder":
             return _reminder(params)
         elif atype == "media_controls":
             return _media_controls(params)
+        elif atype == "smart_navigate":
+            return _smart_navigate(params)
+        elif atype == "get_user_info":
+            return _get_user_info(params)
+        elif atype == "write_file":
+            return _write_file(params)
+        elif atype == "design_web_page":
+            return _design_web_page(params)
         # ───────────────────────────────────────────────────────────────────
         elif atype == "none":
             return None  # Pure conversation — no OS action needed
@@ -277,86 +325,94 @@ def _send_whatsapp_file(params: dict) -> Union[str, dict, None]:
     file_path = params.get("file_path", "")
 
     if not contact:
-        return "Who should I send the file to?"
+        return "Please tell me who you want to send the file to."
 
-    # ── 1. Resolve file path ──────────────────────────────────────────────────
+    # ── 1. Resolve file path robustly ─────────────────────────────────────────
     if not file_path or not os.path.isfile(file_path):
-        search_name = file_name.lower().strip()
+        search_terms = file_name.lower().strip().split()
+        if not search_terms:
+            return "What file should I send?"
+
         search_dirs = [
-            os.path.join(os.path.expanduser("~"), "Downloads"),
-            os.path.join(os.path.expanduser("~"), "Desktop"),
-            os.path.join(os.path.expanduser("~"), "Documents"),
-            # Also check OneDrive Downloads
-            os.path.join(os.path.expanduser("~"), "OneDrive", "Downloads"),
+            get_user_folder("Downloads"),
+            get_user_folder("Desktop"),
+            get_user_folder("Documents")
         ]
+        
+        found_file = None
         for folder in search_dirs:
-            if not os.path.isdir(folder):
-                continue
-            for f in os.listdir(folder):
-                if search_name and search_name in f.lower():
-                    file_path = os.path.join(folder, f)
-                    break
-            if file_path and os.path.isfile(file_path):
-                break
+            if not folder.exists(): continue
+            for f in folder.iterdir():
+                if f.is_file():
+                    fname_lower = f.name.lower()
+                    # Match if ALL search terms are present in filename
+                    if all(term in fname_lower for term in search_terms):
+                        found_file = f
+                        break
+            if found_file: break
+        
+        if found_file:
+            file_path = str(found_file)
 
     if not file_path or not os.path.isfile(file_path):
         return {
-            "speak": f"Yeh file mujhe nahi mili. Downloads mein check karein.",
-            "ui_log": f"⚠️ File not found: '{file_name}' searched in Downloads/Desktop/Documents."
+            "speak": f"Mujhe '{file_name}' naam ki koi file nahi mili.",
+            "ui_log": f"⚠️ File not found: '{file_name}' (Searched Downloads/Desktop/Documents)"
         }
 
     try:
         import pyautogui
+        logger.info(f"Preparing to send file: {file_path}")
 
-        # ── 2. Copy file to Windows clipboard as a file object ────────────────
-        # This is the KEY trick: SetFileDropList lets us Ctrl+V a file into WhatsApp
+        # ── 2. Copy file to Windows clipboard (FileDropList format) ───────────
+        # This allows Ctrl+V to work as a 'file attachment' in WhatsApp
+        normalized_path = os.path.abspath(file_path).replace("'", "''") # Escape for PowerShell
         ps_script = (
             "Add-Type -AssemblyName System.Windows.Forms; "
             "$col = New-Object System.Collections.Specialized.StringCollection; "
-            f"$col.Add('{file_path}'); "
+            f"$col.Add('{normalized_path}'); "
             "[System.Windows.Forms.Clipboard]::SetFileDropList($col)"
         )
         subprocess.run(
             ["powershell", "-WindowStyle", "Hidden", "-Command", ps_script],
             creationflags=subprocess.CREATE_NO_WINDOW,
+            check=True
         )
         time.sleep(0.5)
 
-        # ── 3. Open WhatsApp Desktop and navigate to contact ──────────────────
+        # ── 3. Open WhatsApp and search for contact ───────────────────────────
         os.startfile("whatsapp://")
-        time.sleep(3.5)
-
+        time.sleep(4.0) # Wait for app focus
+        
+        # Ensure we are in search (native WhatsApp shortcut)
         pyautogui.hotkey("ctrl", "f")
         time.sleep(0.5)
+        # Type contact name (typed slowly to ensure search picks it up)
         pyautogui.typewrite(contact, interval=0.05)
         time.sleep(1.5)
         pyautogui.press("enter")
-        time.sleep(1.2)
+        time.sleep(1.5)
 
-        # ── 4. Paste the file into the chat (Ctrl+V) ──────────────────────────
+        # ── 4. Paste and Send ─────────────────────────────────────────────────
+        # Paste trigger (shows the preview window in WhatsApp)
         pyautogui.hotkey("ctrl", "v")
-        time.sleep(2.0)   # WhatsApp processes the file drop and shows a preview
-
-        # ── 5. Press Enter to send ────────────────────────────────────────────
+        time.sleep(2.5) # Wait for WhatsApp to process the file and show the send button
+        
+        # Press Enter twice (once for the preview caption, once to send)
         pyautogui.press("enter")
-        time.sleep(0.8)
+        time.sleep(0.5)
+        pyautogui.press("enter")
 
-        fname = os.path.basename(file_path)
         return {
-            "speak": f"Maine {contact} ko file bhej di.",
-            "ui_log": f"✅ Sent '{fname}' to '{contact}' via WhatsApp Desktop."
+            "speak": f"Theek hai, maine {contact} ko file bhej di hai.",
+            "ui_log": f"✅ Successfully sent file:\n{os.path.basename(file_path)} ➔ {contact}"
         }
 
-    except ImportError:
-        return {
-            "speak": "Automation tool nahi hai.",
-            "ui_log": "⚠️ pyautogui not installed."
-        }
     except Exception as e:
-        logger.error(f"WhatsApp file send error: {e}")
+        logger.error(f"WhatsApp file error: {e}")
         return {
-            "speak": "File bhejne mein thodi mushkil aayi.",
-            "ui_log": f"⚠️ WhatsApp file error: {str(e)[:150]}"
+            "speak": "File bhejne mein problem aa rahi hai. Kya WhatsApp open hai?",
+            "ui_log": f"⚠️ WhatsApp File Error:\n{str(e)[:150]}"
         }
 
 
@@ -414,45 +470,33 @@ def _play_spotify(params: dict) -> Union[str, dict]:
         except Exception as e:
             logger.debug(f"Spotify scrape failed: {e}")
 
-        try:
-            if track_uri:
-                # Open specific track
+        if track_uri:
+            try:
+                # Modern Spotify desktop usually auto-plays track URIs. 
                 os.startfile(track_uri)
-                def _auto_play_track():
-                    time.sleep(3.0) # Wait for page load
-                    script = (
-                        "$wshell = New-Object -ComObject wscript.shell; "
-                        "$proc = Get-Process -Name 'Spotify' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; "
-                        "if ($proc) { "
-                        "  $wshell.AppActivate($proc.Id); Start-Sleep -m 500; "
-                        "  $wshell.SendKeys('{ENTER}'); "
-                        "}"
-                    )
-                    subprocess.Popen(["powershell", "-WindowStyle", "Hidden", "-Command", script], creationflags=subprocess.CREATE_NO_WINDOW)
-                threading.Thread(target=_auto_play_track, daemon=True).start()
                 return f"Playing {query} on Spotify."
-            else:
-                # Strategy B: Fallback to general Search UI
-                os.startfile(f"spotify:search:{encoded}")
-                def _auto_play_search():
-                    time.sleep(3.5)
-                    script = (
-                        "$wshell = New-Object -ComObject wscript.shell; "
-                        "$proc = Get-Process -Name 'Spotify' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; "
-                        "if ($proc) { "
-                        "  $wshell.AppActivate($proc.Id); Start-Sleep -m 500; "
-                        "  $wshell.SendKeys('{TAB}'); Start-Sleep -m 100; "
-                        "  $wshell.SendKeys('{TAB}'); Start-Sleep -m 100; "
-                        "  $wshell.SendKeys('{ENTER}'); "
-                        "}"
-                    )
-                    subprocess.Popen(["powershell", "-WindowStyle", "Hidden", "-Command", script], creationflags=subprocess.CREATE_NO_WINDOW)
-                threading.Thread(target=_auto_play_search, daemon=True).start()
-                return {
-                    "speak": "Mujhe gaana toh mil gaya, par main Spotify pe play nahi kar paayi.",
-                    "ui_log": f"⚠️ Could not resolve direct track URI for '{query}'.\nFell back to general Spotify search and attempted auto-play."
-                }
-                
+            except Exception as e:
+                logger.debug(f"Direct play failed, falling back: {e}")
+
+        # Strategy B: Fallback to general Search UI
+        try:
+            os.startfile(f"spotify:search:{encoded}")
+            def _auto_play_search():
+                time.sleep(3.5)
+                script = (
+                    "$wshell = New-Object -ComObject wscript.shell; "
+                    "$proc = Get-Process -Name 'Spotify' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; "
+                    "if ($proc) { "
+                    "  $wshell.AppActivate($proc.Id); Start-Sleep -m 500; "
+                    "  $wshell.SendKeys('{TAB}'); Start-Sleep -m 100; "
+                    "  $wshell.SendKeys('{TAB}'); Start-Sleep -m 100; "
+                    "  $wshell.SendKeys('{ENTER}'); "
+                    "}"
+                )
+                subprocess.Popen(["powershell", "-WindowStyle", "Hidden", "-Command", script], creationflags=subprocess.CREATE_NO_WINDOW)
+            
+            threading.Thread(target=_auto_play_search, daemon=True).start()
+            return f"Searching for {query} on Spotify."
         except Exception as e:
             logger.error(f"Spotify startfile error: {e}")
             return {
@@ -465,6 +509,51 @@ def _play_spotify(params: dict) -> Union[str, dict]:
         except Exception:
             pass
         return "Opening Spotify."
+
+
+def _write_file(params: dict) -> str:
+    """Write or append content to a file. Auto-creates the 'Yuki_Designs' folder on Desktop if needed."""
+    path_str = params.get("path", "")
+    content  = params.get("content", "")
+    mode     = params.get("mode", "overwrite") # overwrite or append
+    
+    if not path_str:
+        # Use our robust desktop resolver
+        desktop = get_desktop_path() / "Yuki_Designs"
+        desktop.mkdir(parents=True, exist_ok=True)
+        path = desktop / f"design_{int(time.time())}.html"
+    else:
+        path = Path(path_str).resolve()
+        
+    try:
+        # Safety check: restrict to user profile
+        user_home = Path(os.path.expanduser("~")).resolve()
+        if user_home not in path.parents and path != user_home:
+            return f"Access denied: '{path}' is outside your home directory."
+
+        # Ensure directory exists
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        write_mode = "w" if mode == "overwrite" else "a"
+        with open(path, write_mode, encoding="utf-8") as f:
+            f.write(content)
+            
+        logger.info(f"[EXECUTOR] File written to {path}")
+        
+        # Auto-view if it's a web page
+        if path.suffix in [".html", ".htm"]:
+            import webbrowser
+            webbrowser.open(f"file:///{path}")
+            return f"Design complete! I've saved it to your Desktop and opened it in your browser."
+
+        return f"Successfully wrote to {path.name}."
+    except Exception as e:
+        logger.error(f"Write file error: {e}")
+        return f"failed to write file: {e}"
+
+def _design_web_page(params: dict) -> str:
+    """High-level wrapper for web design. Hands off content to _write_file."""
+    return _write_file(params)
 
 
 def _file_op(params: dict) -> Optional[str]:
@@ -660,24 +749,6 @@ def _set_brightness(params: dict) -> str:
         return "I couldn't change the brightness. Make sure you're on a laptop with a WMI-compatible display."
 
 
-def _get_weather(params: dict) -> str:
-    """Fetch weather from wttr.in (free, no API key needed)."""
-    import urllib.request
-    import urllib.parse
-    city = params.get("city", "")
-    if not city:
-        return "Which city's weather would you like to know?"
-    try:
-        encoded = urllib.parse.quote(city)
-        url = f"http://wttr.in/{encoded}?format=3"
-        req = urllib.request.Request(url, headers={"User-Agent": "curl/7.0"})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            text = resp.read().decode("utf-8").strip()
-        # wttr.in format=3 returns: "Delhi: ⛅  +32°C"
-        return text if text else f"Couldn't get weather for {city}."
-    except Exception as e:
-        logger.error(f"get_weather error: {e}")
-        return f"Couldn't fetch weather for {city} right now."
 
 
 def _detect_audio_app() -> tuple[str | None, int | None]:
@@ -838,39 +909,172 @@ def _clipboard_copy(params: dict) -> str:
         return "Couldn't copy to clipboard."
 
 
+def _get_weather(params: dict) -> str:
+    """Fetch current weather for a location. Auto-detects local city if none provided."""
+    import requests
+    # Support 'city', 'location', or 'target' keys
+    location = params.get("location") or params.get("city") or params.get("target")
+    location = str(location).strip() if (location and str(location).strip()) else ""
+    
+    lat, lon, display_name = None, None, None
+
+    try:
+        # 1. If no location provided, try auto-detection via IP
+        if not location:
+            user = mem.get_user()
+            stored_loc = user.get("location", "").strip()
+            
+            if stored_loc:
+                location = stored_loc
+            else:
+                try:
+                    ip_url = "http://ip-api.com/json/"
+                    ip_data = requests.get(ip_url, timeout=2).json()
+                    if ip_data.get("status") == "success":
+                        lat = ip_data.get("lat")
+                        lon = ip_data.get("lon")
+                        display_name = f"{ip_data.get('city')}, {ip_data.get('country')}"
+                        logger.info(f"[WEATHER] Auto-detected: {display_name}")
+                except Exception as e:
+                    logger.debug(f"[WEATHER] Auto-detect failed: {e}")
+                    location = "London" # Final fallback
+
+        # 2. If we have a location name but no lat/lon yet, geocode it
+        if location and not lat:
+            # Use requests.utils.quote to handle spaces in city names
+            geo_url = f"https://nominatim.openstreetmap.org/search?q={requests.utils.quote(location)}&format=json&limit=1"
+            headers = {"User-Agent": "YukiAssistant/1.0"}
+            geo_res = requests.get(geo_url, headers=headers, timeout=5).json()
+            if not geo_res:
+                return f"I couldn't find the location '{location}'."
+            lat = geo_res[0]["lat"]
+            lon = geo_res[0]["lon"]
+            display_name = geo_res[0]["display_name"].split(",")[0]
+
+        # 3. Fetch weather from Open-Meteo
+        if lat and lon:
+            w_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
+            w_res = requests.get(w_url, timeout=5).json()
+            cw = w_res.get("current_weather", {})
+            temp = cw.get("temperature")
+            wind = cw.get("windspeed")
+            return f"Currently in {display_name}, it's {temp}°C with a wind speed of {wind} km/h."
+        
+        return "I'm having trouble fetching the weather right now."
+
+    except Exception as e:
+        logger.error(f"Weather tool error: {e}")
+        return f"I couldn't fetch the weather: {str(e)[:100]}"
+
+def _get_user_info(params: dict) -> str:
+    """Retrieve personal information from local memory (Zero-Token)."""
+    query = params.get("query", "").lower()
+    user = mem.get_user()
+    
+    if "name" in query:
+        return f"Your name is {user['name']}." if user['name'] else "I don't know your name yet."
+    elif "preference" in query or "like" in query:
+        prefs = user.get("preferences", {})
+        if prefs:
+            return "Here are the preferences I know: " + ", ".join(f"{k} is {v}" for k,v in prefs.items())
+        return "I haven't recorded any specific preferences for you yet."
+    
+    return mem.context_block()
+
+def _smart_navigate(params: dict) -> str:
+    """Smart App Navigation using pywinauto (Local, Native UI Tree)."""
+    try:
+        from pywinauto import Desktop
+        target = params.get("target", "").lower()
+        action = params.get("action", "click") # click, focus, list
+        
+        # 1. Find the top-level window
+        windows = Desktop(backend="uia").windows()
+        active_win = None
+        for w in windows:
+            if w.is_active():
+                active_win = w
+                break
+        
+        if not active_win:
+            return "No active window found to navigate."
+
+        if action == "list":
+            # List all buttons/interactables
+            elems = active_win.descendants(control_type="Button")
+            names = [e.window_text() for e in elems if e.window_text()]
+            return "Found buttons: " + ", ".join(names[:10])
+
+        # Find the specific element
+        try:
+            elem = active_win.child_window(title_re=f".*{target}.*", control_type="Button")
+            if action == "click":
+                elem.click_input()
+                return f"Successfully clicked {target} in {active_win.window_text()}."
+            elif action == "focus":
+                elem.set_focus()
+                return f"Focused on {target}."
+        except Exception:
+            return f"I couldn't find a button named '{target}' in the current window."
+
+    except Exception as e:
+        logger.error(f"Smart Navigate error: {e}")
+        return f"Navigation failed: {str(e)[:100]}"
+
 def _reminder(params: dict) -> str:
-    """Show a Windows toast notification after a delay."""
-    import threading
+    """Add a persistent reminder to the local store (Zero-Token)."""
     text          = params.get("text", "Reminder!")
     delay_minutes = float(params.get("delay_minutes", 1))
-    delay_secs    = delay_minutes * 60
-
-    def _show_toast():
-        time.sleep(delay_secs)
-        try:
-            ps_cmd = (
-                f'[System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") | Out-Null; '
-                f'$notify = New-Object System.Windows.Forms.NotifyIcon; '
-                f'$notify.Icon = [System.Drawing.SystemIcons]::Information; '
-                f'$notify.Visible = $true; '
-                f'$notify.ShowBalloonTip(8000, "Yuki Reminder", "{text}", [System.Windows.Forms.ToolTipIcon]::Info); '
-                f'Start-Sleep 10; $notify.Dispose()'
-            )
-            subprocess.Popen(
-                ["powershell", "-WindowStyle", "Hidden", "-Command", ps_cmd],
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        except Exception as e:
-            logger.error(f"Reminder toast error: {e}")
-
-    t = threading.Timer(delay_secs, _show_toast)
-    t.daemon = True
-    t.start()
-
+    
+    # Calculate due time
+    due_dt = datetime.datetime.now() + datetime.timedelta(minutes=delay_minutes)
+    due_iso = due_dt.isoformat()
+    
+    mem.add_reminder(text, due_iso)
+    
     if delay_minutes < 1:
-        when = f"{int(delay_secs)}s"
-    elif delay_minutes == 1:
-        when = "1 minute"
+        when = f"{int(delay_minutes * 60)} seconds"
     else:
         when = f"{int(delay_minutes)} minutes"
+        
     return f"Got it! I'll remind you about '{text}' in {when}."
+
+def _system_control(params: dict) -> str:
+    """Control Windows power states: shutdown, restart, sleep, lock."""
+    from backend.utils.permissions import requires_explicit_confirmation, is_confirmed
+
+    action = params.get("action", "").lower().strip()
+
+    if requires_explicit_confirmation(action) and not is_confirmed(params):
+        return f"Safety check: confirm {action} by retrying with confirm=true."
+    
+    try:
+        if action == "shutdown":
+            # 60s delay so user can cancel with 'shutdown /a' if mistake
+            subprocess.Popen(["shutdown", "/s", "/t", "60", "/c", "Yuki is shutting down the system in 60 seconds..."])
+            return "PC will shut down in 60 seconds. Say 'abort shutdown' to cancel."
+        
+        elif action == "restart":
+            subprocess.Popen(["shutdown", "/r", "/t", "0"])
+            return "Restarting the system now."
+            
+        elif action == "sleep":
+            # Note: Hibernation must be off for this to actually sleep; otherwise it hibernates.
+            # Powercfg -h off
+            subprocess.Popen(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"])
+            return "Putting the system to sleep."
+            
+        elif action == "lock":
+            subprocess.Popen(["rundll32.exe", "user32.dll,LockWorkStation"])
+            return "Locking the computer."
+            
+        elif action == "abort":
+            subprocess.run(["shutdown", "/a"])
+            return "Shutdown aborted."
+            
+        else:
+            return f"Unknown system control action: {action}"
+            
+    except Exception as e:
+        logger.error(f"System control error: {e}")
+        return f"Failed to perform {action}: {e}"

@@ -10,6 +10,7 @@ import { useConfig } from '../hooks/useConfig';
 import type { OrbState } from '../App';
 
 interface MiniWidgetProps {
+  onTrigger: () => void;
   onExpand:  () => void;
   onClose:   () => void;
   orbState:  OrbState;
@@ -23,8 +24,8 @@ const STATE = {
     label:  'READY',
     pulse:  false,
     icon:   'graphic_eq',
-    border: 'rgba(143,245,255,0.12)',
-    glow:   'rgba(143,245,255,0.06)',
+    border: 'rgba(143,245,255,0.22)',
+    glow:   'rgba(143,245,255,0.12)',
   },
   listening: {
     color:  '#8ff5ff',
@@ -55,7 +56,7 @@ const STATE = {
   },
 };
 
-export default function MiniWidget({ onExpand, onClose, orbState }: MiniWidgetProps) {
+export default function MiniWidget({ onTrigger, onExpand, onClose, orbState }: MiniWidgetProps) {
   const { name } = useConfig();
   const s = STATE[orbState];
 
@@ -94,16 +95,23 @@ export default function MiniWidget({ onExpand, onClose, orbState }: MiniWidgetPr
           className="glass-mini relative flex items-center gap-3 px-4 py-3 rounded-2xl pointer-events-auto transition-all duration-500"
           style={{
             borderColor: s.border,
-            minWidth: 300,
+            minWidth: 320,
+            backgroundColor: 'rgba(12, 14, 18, 0.86)',
+            backgroundImage: `linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.00)), radial-gradient(circle at top right, ${s.color}14 0%, transparent 65%)`,
+            backdropFilter: 'blur(18px) saturate(170%)',
+            WebkitBackdropFilter: 'blur(18px) saturate(170%)',
+            boxShadow: `0 12px 36px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px ${s.border}`,
           }}
         >
+          {/* Subtle decorative "HUD" pattern */}
+          <div className="absolute inset-0 pointer-events-none opacity-[0.06] dot-grid rounded-[inherit]" />
 
           {/* ── Left: Orb + Name + State ─────────────────────────────────── */}
           <div className="flex items-center gap-3 flex-1 min-w-0">
 
             {/* Mini orb */}
             <button
-              onClick={() => window.yukiAPI?.trigger()}
+              onClick={onTrigger}
               className="relative flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 focus:outline-none no-drag-region"
               style={{
                 background: `radial-gradient(circle at 35% 35%, ${s.color}25 0%, ${s.color}08 60%, transparent)`,
@@ -167,7 +175,7 @@ export default function MiniWidget({ onExpand, onClose, orbState }: MiniWidgetPr
           </div>
 
           {/* ── Divider ──────────────────────────────────────────────────── */}
-          <div className="w-px h-6 bg-white/[0.06] flex-shrink-0" />
+          <div className="w-px h-6 bg-white/[0.14] flex-shrink-0" />
 
           {/* ── Right: Action buttons ─────────────────────────────────────  */}
           <div className="flex items-center gap-0.5 flex-shrink-0 no-drag-region">

@@ -160,14 +160,20 @@ export default function AgentView({
   const cfg     = STATE_CONFIG[orbState];
   const isActive = orbState !== 'idle';
 
-  // Track last assistant message for the main display
+  // Track last assistant message for the main display – keep it visible even after finish speaking
   useEffect(() => {
     const last = [...messages].reverse().find(m => m.role === 'assistant');
-    if (last && orbState === 'speaking') {
+    if (last) {
       setLastResponse(last.text);
-      setShowChat(true); // Auto-reveal chat when Yuki responds
     }
-  }, [messages, orbState]);
+  }, [messages]);
+
+  // Reset display when a new interaction begins (listening)
+  useEffect(() => {
+    if (orbState === 'listening') {
+      setLastResponse('');
+    }
+  }, [orbState]);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -386,26 +392,7 @@ export default function AgentView({
           {isHotListening ? 'READY FOR MORE...' : orbState === 'idle' ? `${greeting}, Boss` : statusLabel}
         </div>
 
-        {/* ── Live transcript (what Yuki heard) ────────────────────────────  */}
-        {transcription && (
-          <div className="mt-4 px-12 text-center max-w-xl animate-fade-in">
-            <p className="font-headline text-xl font-light text-on-surface/70 tracking-tight">
-              "{transcription}"
-            </p>
-          </div>
-        )}
-
-        {/* ── Last spoken response (big, center-stage) ─────────────────────  */}
-        {orbState === 'speaking' && lastResponse && (
-          <div className="mt-6 px-12 text-center max-w-2xl animate-fade-in">
-            <p
-              className="font-headline text-2xl font-medium leading-snug tracking-tight"
-              style={{ color: color.primary }}
-            >
-              {lastResponse}
-            </p>
-          </div>
-        )}
+        {/* Spoken/transcript overlays intentionally hidden for a cleaner orb view. */}
 
         {/* ── Clarification buttons ─────────────────────────────────────────  */}
         {clarifyQuestion && clarifyOptions.length > 0 && (

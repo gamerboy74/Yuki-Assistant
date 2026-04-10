@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('yukiAPI', {
 
   // Manually trigger Aetheris (orb / mic click)
   trigger: () => ipcRenderer.send('yuki:trigger'),
+  cancelTrigger: () => ipcRenderer.send('yuki:cancel-trigger'),
 
   // Send a typed text message to Python
   sendMessage: (text) => ipcRenderer.send('yuki:message', text),

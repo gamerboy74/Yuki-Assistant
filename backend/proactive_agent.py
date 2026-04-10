@@ -16,7 +16,10 @@ Cooldown: won't repeat the same alert for 5 minutes.
 
 import threading
 import time
+import datetime
+import psutil
 from backend.utils.logger import get_logger
+from backend import memory as mem
 
 logger = get_logger(__name__)
 
@@ -94,11 +97,11 @@ class ProactiveAgent:
             self._cpu_high_count = 0  # Reset after alerting
 
         # ── 2. RAM ────────────────────────────────────────────────────────
-        mem = psutil.virtual_memory()
-        if mem.percent > 90:
+        vmem = psutil.virtual_memory()
+        if vmem.percent > 90:
             self._fire_alert(
                 "ram",
-                f"Heads-up — RAM usage is at {mem.percent:.0f}%. "
+                f"Heads-up — RAM usage is at {vmem.percent:.0f}%. "
                 "You might want to close some apps."
             )
 
@@ -130,6 +133,22 @@ class ProactiveAgent:
                 )
         except Exception:
             pass  # Non-fatal
+
+        # ── 5. Reminders ──────────────────────────────────────────────────
+        try:
+            due = mem.get_due_reminders()
+            for r in due:
+                self._fire_alert(
+                    f"reminder_{r['id']}",
+                    f"Heads up! You asked me to remind you: {r['text']}"
+                )
+                mem.mark_reminder_done(r['id'])
+        except Exception as e:
+            logger.error(f"[PROACTIVE] Reminder check failed: {e}")
+
+        # ── 6. Context Insights (Birthdays, etc.) ──────────────────────────
+        # TODO: Implement local memory scanning for dates
+        pass
 
     def _fire_alert(self, alert_type: str, message: str) -> None:
         """Fire an alert if the cooldown has elapsed."""

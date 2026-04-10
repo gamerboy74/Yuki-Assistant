@@ -82,12 +82,7 @@ def correct_transcript(text: str) -> str:
     if not _should_correct(text):
         return text   # No known mishear patterns — skip the Ollama round-trip
 
-    # If the fast-path router would intercept this anyway (e.g. VS Code is already fuzzy matched),
-    # skip the Ollama round-trip. We import it locally to avoid circular dependencies.
-    from backend import intent_router
-    if intent_router.route(text) is not None:
-        logger.debug(f"STT correction skipped (router already matched: {text!r})")
-        return text
+
 
     payload = json.dumps({
         "model": OLLAMA_MODEL,

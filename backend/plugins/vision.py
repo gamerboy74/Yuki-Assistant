@@ -1,16 +1,9 @@
-"""
-Vision Plugin — Allows Yuki to take a background screenshot and analyze it with OpenAI Vision.
-"""
-
 import os
-import base64
 import io
 from backend.plugins._base import Plugin
 from backend.utils.logger import get_logger
-from backend.config import OPENAI_API_KEY
 
 logger = get_logger(__name__)
-
 
 class VisionPlugin(Plugin):
     name = "analyze_screen"
@@ -23,32 +16,30 @@ class VisionPlugin(Plugin):
         },
         "find_coordinates_of": {
             "type": "string",
-            "description": "If you need to click an element, describe it here. The plugin will return its exact (x, y) pixel coordinates on the screen.",
+            "description": "If you need to click an element, describe it here. Returns exact (x, y) pixel coordinates.",
             "required": False,
         }
     }
 
     def execute(self, query: str = "Describe what is on my screen.", find_coordinates_of: str = "", **_) -> str:
-        if not OPENAI_API_KEY:
-            return "Vision requires the OpenAI API key, but it is not set."
+        api_key = os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            return "Vision requires the GOOGLE_API_KEY, but it is not set."
 
         try:
             from PIL import ImageGrab
-        except ImportError:
-            return "Pillow library is missing. Install via: pip install Pillow"
+            from google import genai
+            from google.genai import types
+        except ImportError as e:
+            return f"Required library missing: {e}. Install via: pip install Pillow google-genai"
 
         try:
-            from openai import OpenAI
-        except ImportError:
-            return "OpenAI library is missing. Install via: pip install openai"
-
-        try:
-            # Take a screenshot
-            logger.info("Taking background screenshot for Vision analysis...")
+            # 1. Capture Screenshot
+            logger.info("[VISION] Capturing background screenshot...")
             screenshot = ImageGrab.grab()
             orig_width, orig_height = screenshot.size
             
-            # Compress it to optimize token usage and latency
+            # 2. Optimized size (Gemini is fast, but 720p is usually enough for UI detection)
             max_size = (1280, 720)
             screenshot.thumbnail(max_size)
             scale_ratio_width = orig_width / screenshot.size[0]
@@ -56,47 +47,51 @@ class VisionPlugin(Plugin):
 
             buffered = io.BytesIO()
             screenshot.save(buffered, format="JPEG", quality=75)
-            img_b64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+            img_bytes = buffered.getvalue()
 
-            # Send to GPT-4o Vision
-            client = OpenAI(api_key=OPENAI_API_KEY)
+            # 3. Analyze with Gemini 2.0 Flash
+            client = genai.Client(api_key=api_key)
             
             vision_query = query
             if find_coordinates_of:
-                vision_query = f"I need to click on '{find_coordinates_of}'. Reply ONLY with the estimated X, Y coordinates in the image provided (which has width {screenshot.size[0]} and height {screenshot.size[1]}), separated by a comma. E.g. '400, 250'. If not found, reply 'NOT_FOUND'."
+                # Optimized prompt for Gemini's spatial reasoning
+                vision_query = (
+                    f"Task: Find the exact center coordinates of '{find_coordinates_of}' on this screen. "
+                    f"Screen dimensions: {screenshot.size[0]}x{screenshot.size[1]}. "
+                    "Reply ONLY with the coordinates in format 'X, Y'. "
+                    "Example: '450, 220'. If not found, reply 'NOT_FOUND'."
+                )
 
-            response = client.chat.completions.create(
-                model="gpt-4o",  # gpt-4o is significantly better at coordinate math than mini
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": vision_query},
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{img_b64}"
-                                }
-                            }
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part(text=vision_query),
+                            types.Part(inline_data=types.Blob(mime_type="image/jpeg", data=img_bytes))
                         ]
-                    }
-                ],
-                max_tokens=250,
+                    )
+                ]
             )
 
-            result = response.choices[0].message.content.strip()
+            result = response.text.strip()
 
-            if find_coordinates_of and result != "NOT_FOUND":
-                # Scale coordinates back up to original screen size
+            # 4. Handle Coordinate Logic
+            if find_coordinates_of and "NOT_FOUND" not in result:
                 try:
-                    parts = result.split(',')
-                    cx = int(parts[0].strip())
-                    cy = int(parts[1].strip())
-                    real_x = int(cx * scale_ratio_width)
-                    real_y = int(cy * scale_ratio_height)
-                    return f"Coordinates found: ({real_x}, {real_y})"
+                    # Look for the last 'X, Y' pattern in case Gemini rambles
+                    import re
+                    match = re.search(r"(\d+)\s*,\s*(\d+)", result)
+                    if match:
+                        cx = int(match.group(1))
+                        cy = int(match.group(2))
+                        real_x = int(cx * scale_ratio_width)
+                        real_y = int(cy * scale_ratio_height)
+                        logger.info(f"[VISION] Coordinate detected: {real_x}, {real_y}")
+                        return f"Coordinates found: ({real_x}, {real_y})"
                 except Exception:
-                    return f"Could not find exact coordinates. Vision model returned: {result}"
+                    pass
 
             logger.info("[VISION] Screen analysis successful.")
             return result

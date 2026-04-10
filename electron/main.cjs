@@ -6,6 +6,8 @@ const readline = require('readline');
 let mainWindow;
 let tray;
 let pythonProcess = null;
+let uiReady = false;
+let pendingStateMessages = [];
 // Set YUKI_DEV=1 environment variable to use Vite dev server (localhost:5173)
 // Without it, always loads from dist/renderer (production build)
 const isDev = process.env.YUKI_DEV === '1';
@@ -14,6 +16,8 @@ const isDev = process.env.YUKI_DEV === '1';
 // ── Python Backend Spawner ────────────────────────────────────────────────────
 function startPython() {
   const projectRoot = path.join(__dirname, '..');
+  uiReady = false;
+  pendingStateMessages = [];
 
   // Try .venv first (project venv), then system python
   const venvPython = path.join(projectRoot, '.venv', 'Scripts', 'python.exe');
@@ -38,8 +42,14 @@ function startPython() {
     try {
       const msg = JSON.parse(line.trim());
       console.log('[Yuki Python →]', JSON.stringify(msg));
-      if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow && !mainWindow.isDestroyed() && uiReady) {
         mainWindow.webContents.send('yuki:state', msg);
+      } else {
+        pendingStateMessages.push(msg);
+        // Keep queue bounded so a broken UI cannot grow memory forever.
+        if (pendingStateMessages.length > 100) {
+          pendingStateMessages = pendingStateMessages.slice(-100);
+        }
       }
     } catch (e) {
       console.log('[Python stdout]', line);
@@ -242,6 +252,11 @@ ipcMain.on('yuki:trigger', () => {
   sendToPython({ type: 'manual_trigger' });
 });
 
+ipcMain.on('yuki:cancel-trigger', () => {
+  console.log('[Yuki Renderer →]', 'cancel trigger');
+  sendToPython({ type: 'cancel_listening' });
+});
+
 // Text message from chat input
 ipcMain.on('yuki:message', (event, text) => {
   console.log('[Yuki Renderer →]', 'message:', text);
@@ -250,6 +265,13 @@ ipcMain.on('yuki:message', (event, text) => {
 
 ipcMain.on('yuki:ui-ready', () => {
   console.log('[Yuki Renderer →]', 'UI Ready');
+  uiReady = true;
+  if (mainWindow && !mainWindow.isDestroyed() && pendingStateMessages.length) {
+    for (const msg of pendingStateMessages) {
+      mainWindow.webContents.send('yuki:state', msg);
+    }
+    pendingStateMessages = [];
+  }
   sendToPython({ type: 'ui_ready' });
 });
 

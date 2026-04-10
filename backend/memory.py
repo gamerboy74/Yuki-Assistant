@@ -50,6 +50,7 @@ _DEFAULT: dict = {
         "details":     {},   # anything else ("I own a dog named Max")
     },
     "memories": [],          # list of {"id", "text", "created_at", "tags"}
+    "reminders": [],         # list of {"id", "text", "due_at", "done": bool}
     "session_count": 0,
 }
 
@@ -202,6 +203,46 @@ def clear_all() -> str:
         _store["user"]["details"] = {}
         _save(_store)
     return "Done. I've cleared all my memories and profile data."
+
+# ── Reminders ─────────────────────────────────────────────────────────────────
+
+def add_reminder(text: str, due_at: str) -> None:
+    """Add a persistent reminder. due_at should be an ISO timestamp."""
+    import uuid
+    with _LOCK:
+        _store.setdefault("reminders", [])
+        entry = {
+            "id": str(uuid.uuid4())[:8],
+            "text": text.strip(),
+            "due_at": due_at,
+            "done": False,
+            "created_at": datetime.datetime.now().isoformat()
+        }
+        _store["reminders"].append(entry)
+        _save(_store)
+    logger.info(f"[MEMORY] Reminder added: '{text}' for {due_at}")
+
+def get_due_reminders() -> list[dict]:
+    """Return all reminders that are due but not yet marked done."""
+    import datetime
+    now = datetime.datetime.now().isoformat()
+    due = []
+    with _LOCK:
+        reminders = _store.get("reminders", [])
+        for r in reminders:
+            if not r.get("done") and r.get("due_at") <= now:
+                due.append(r)
+    return due
+
+def mark_reminder_done(reminder_id: str) -> None:
+    """Mark a specific reminder as completed."""
+    with _LOCK:
+        for r in _store.get("reminders", []):
+            if r.get("id") == reminder_id:
+                r["done"] = True
+                break
+        _save(_store)
+    logger.info(f"[MEMORY] Reminder {reminder_id} marked as done.")
 
 
 def context_block() -> str:

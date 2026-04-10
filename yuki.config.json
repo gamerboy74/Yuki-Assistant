@@ -1,7 +1,11 @@
 {
   "assistant": {
     "name": "Yuki",
-    "wake_words": ["hey yuki", "ok yuki", "yuki"],
+    "wake_words": [
+      "hey yuki",
+      "ok yuki",
+      "yuki"
+    ],
     "greeting": "Hey! I'm Yuki. Ask me anything, or say \"Hey Yuki\" to activate voice mode.",
     "idle_label": "SAY \"HEY YUKI\"",
     "tts_voice": "en-IN-NeerjaNeural"
@@ -20,5 +24,10 @@
     "enabled": true,
     "fuzzy_threshold": 0.72,
     "log_fast_path": true
+  },
+  "gemini": {
+    "model": "gemini-2.0-flash",
+    "fallback_model": "gemini-2.5-flash-lite",
+    "use_lite_fallback": true
   }
 }

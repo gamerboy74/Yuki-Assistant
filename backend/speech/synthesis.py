@@ -29,32 +29,70 @@ ELEVENLABS_CHAR_BUDGET = int(os.environ.get("ELEVENLABS_CHAR_BUDGET", "300"))
 
 # Shared lock — prevents overlapping TTS playback
 _speak_lock = threading.Lock()
-_pygame_initialized = False
+_mixer_ready = False
 
-
-# Pre-import pygame at top-level to prevent Windows OS Loader Lock deadlocks 
-# when starting concurrent threads later.
+# Pre-import and init pygame at top-level for Windows stability.
+# 44100Hz Stereo is the universal standard for digital audio.
 try:
     import pygame
-    pygame.mixer.init()
-    _pygame_initialized = True
+    if not pygame.mixer.get_init():
+        pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=4096)
+    _mixer_ready = True
 except Exception as e:
     logger.error(f"pygame global init failed: {e}")
-    _pygame_initialized = False
+    _mixer_ready = False
 
-def _init_pygame():
-    pass # Already initialized globally
+_playback_stop_event = threading.Event()
+
+def stop_speech():
+    """Interrupt and stop current audio playback immediately (Barge-in)."""
+    _playback_stop_event.set()
+    if _pygame_initialized and pygame.mixer.music.get_busy():
+        try:
+            pygame.mixer.music.stop()
+        except:
+            pass
+
+def _ensure_mixer():
+    """Coordinate to ensure mixer is ready at 44.1kHz."""
+    global _mixer_ready
+    if _mixer_ready:
+        return True
+    
+    try:
+        import pygame
+        if not pygame.mixer.get_init():
+            pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=4096)
+        _mixer_ready = True
+        return True
+    except Exception as e:
+        logger.error(f"Mixer init failed in synthesis: {e}")
+        return False
 
 def _play_audio_file(path: str):
     """Play an mp3/wav file via pygame and block until done."""
-    global _pygame_initialized
-    if not _pygame_initialized:
-        logger.error("Cannot play audio: pygame not initialized")
+    if not _ensure_mixer():
         return
         
+    _playback_stop_event.clear()
+    
+    # ── Neural Pre-warm (150ms Silence Padding) ──
+    # This wakes up hardware/Bluetooth speakers before the actual speech starts.
+    try:
+        import numpy as np
+        # 44100Hz Stereo (2 channels)
+        pre_warm_samples = int(44100 * 0.15)
+        silence = np.zeros((pre_warm_samples, 2), dtype=np.int16)
+        pygame.mixer.Sound(buffer=silence).play()
+    except Exception as e:
+        logger.debug(f"Pre-warm failed: {e}")
+
     pygame.mixer.music.load(path)
     pygame.mixer.music.play()
     while pygame.mixer.music.get_busy():
+        if _playback_stop_event.is_set():
+            pygame.mixer.music.stop()
+            break
         import time
         time.sleep(0.05)
 
@@ -142,17 +180,34 @@ async def _speak_edge_async(text: str, tmp_path: str) -> bool:
     return False
 
 
+def _normalize_text(text: str) -> str:
+    """Natural speech normalizer — converts symbols/units to spoken words."""
+    import re
+    # 1. Currency (e.g. $5 -> 5 dollars)
+    text = re.sub(r'\$(\d+(\.\d+)?)\s*(billion|million|trillion|lakh|crore)?', r'\1 \3 dollars', text, flags=re.IGNORECASE)
+    # 2. Temperature (e.g. 28.6°C -> 28.6 degree)
+    text = text.replace("°C", " degree")
+    text = text.replace("°", " degree")
+    # 3. Speed (e.g. 13.5 km/h -> 13.5 kilometers per hour)
+    text = text.replace("km/h", " kilometers per hour")
+    # 4. Percent
+    text = text.replace("%", " percent")
+    # 5. Math/Signs
+    text = text.replace("+", " plus ").replace("=", " equals ")
+    # Clean up double spaces
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
 # ── Core async speak ──────────────────────────────────────────────────────────
 
 async def _speak_async(text: str) -> None:
-    try:
-        import pygame
-    except ImportError:
-        logger.error("pygame not installed. Run: pip install pygame")
+    if not _ensure_mixer():
         _fallback_speak(text)
         return
 
-    _init_pygame()
+    # Expert Normalization Layer
+    text = _normalize_text(text)
 
     # UUID name → zero collision risk when speak_async fires multiple threads
     tmp_path = os.path.join(tempfile.gettempdir(), f"yuki_tts_{uuid.uuid4().hex}.mp3")

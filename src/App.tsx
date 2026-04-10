@@ -18,6 +18,9 @@ export type OrbState = 'idle' | 'listening' | 'speaking' | 'processing';
 
 export interface YukiMsg {
   type: string;
+  seq?: number;
+  turn_id?: string;
+  ts?: number;
   text?: string;
   question?: string;
   options?: string[];
@@ -42,6 +45,7 @@ declare global {
       onState:             (cb: (msg: YukiMsg) => void) => void;
       sendChoice:          (choice: string) => void;
       trigger:             () => void;
+      cancelTrigger:       () => void;
       sendMessage:         (text: string) => void;
       sendUIReady:         () => void;
       saveHistory:         (messages: ChatMessage[]) => void;
@@ -54,7 +58,7 @@ declare global {
 
 export default function App() {
   const config = useConfig();
-  const [currentPage, setCurrentPage] = useState<Page>('chat');
+  const [currentPage, setCurrentPage] = useState<Page>('listen');
   const [isMiniMode, setIsMiniMode] = useState<boolean>(false);
 
   // ── Shared voice / agent state ──────────────────────────────────────────
@@ -65,6 +69,9 @@ export default function App() {
   const [clarifyOptions,    setClarifyOptions]    = useState<string[]>([]);
   const [isHotListening,    setIsHotListening]    = useState<boolean>(false);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const speakingWatchdog = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSeqRef = useRef<number>(0);
+  const activeTurnRef = useRef<string | null>(null);
   const [messages,          setMessages]          = useState<ChatMessage[]>([
     {
       id: '0',
@@ -85,8 +92,49 @@ export default function App() {
     window.yukiAPI.onState((msg: YukiMsg) => {
       console.log('[Yuki state]', msg);
 
+      // Ignore out-of-order realtime events.
+      if (typeof msg.seq === 'number') {
+        if (msg.seq <= lastSeqRef.current) return;
+        lastSeqRef.current = msg.seq;
+      }
+
+      // Track active turn on processing events.
+      if (msg.type === 'processing' && msg.turn_id) {
+        activeTurnRef.current = msg.turn_id;
+      }
+
+      // Drop stale events from a previous turn.
+      const turnScoped = new Set([
+        'processing', 'transcript', 'loading', 'speaking', 'response', 'turn_completed', 'idle'
+      ]);
+      if (
+        msg.turn_id &&
+        activeTurnRef.current &&
+        msg.turn_id !== activeTurnRef.current &&
+        turnScoped.has(msg.type)
+      ) {
+        return;
+      }
+
+      const clearSpeakingWatchdog = () => {
+        if (speakingWatchdog.current) {
+          clearTimeout(speakingWatchdog.current);
+          speakingWatchdog.current = null;
+        }
+      };
+
+      const armSpeakingWatchdog = () => {
+        clearSpeakingWatchdog();
+        speakingWatchdog.current = setTimeout(() => {
+          setOrbState('idle');
+          setStatusLabel(config.idleLabel);
+          setIsHotListening(false);
+        }, 15000);
+      };
+
       switch (msg.type) {
         case 'idle':
+          clearSpeakingWatchdog();
           // Debounce idle: short idle flashes (hot-window) shouldn't reset UI
           if (idleTimer.current) clearTimeout(idleTimer.current);
           idleTimer.current = setTimeout(() => {
@@ -95,12 +143,13 @@ export default function App() {
             setIsHotListening(false);
             setClarifyQuestion('');
             setClarifyOptions([]);
-            // Keep transcription visible for 2s after going idle, then fade
-            setTimeout(() => setTranscription(''), 2000);
+            // Faster fade out for transcription
+            setTimeout(() => setTranscription(''), 800);
           }, 300); // 300ms debounce — absorbs rapid idle→listening→idle flicker
           break;
 
         case 'wake':
+          clearSpeakingWatchdog();
           if (idleTimer.current) clearTimeout(idleTimer.current);
           setOrbState('listening');
           setStatusLabel('LISTENING...');
@@ -111,19 +160,24 @@ export default function App() {
           break;
 
         case 'listening':
+          clearSpeakingWatchdog();
           if (idleTimer.current) clearTimeout(idleTimer.current);
-          // Distinguish hot-listen window (soft glow) from active wake listen
-          if (orbState === 'idle') {
-            // post-task hot window — subtle pulse, don't fully activate orb
-            setIsHotListening(true);
-            setStatusLabel('READY FOR MORE...');
-          } else {
-            setOrbState('listening');
-            setStatusLabel('LISTENING...');
-          }
+          setOrbState('listening');
+          setStatusLabel('LISTENING...');
+          setIsHotListening(false);
+          setTranscription('');
+          break;
+
+        case 'hot_listen':
+          clearSpeakingWatchdog();
+          if (idleTimer.current) clearTimeout(idleTimer.current);
+          setOrbState('idle');
+          setIsHotListening(false);
+          setStatusLabel(config.idleLabel);
           break;
 
         case 'transcript':
+          clearSpeakingWatchdog();
           if (idleTimer.current) clearTimeout(idleTimer.current);
           setIsHotListening(false);
           setOrbState('processing');
@@ -140,23 +194,29 @@ export default function App() {
           break;
 
         case 'processing':
+          clearSpeakingWatchdog();
           if (idleTimer.current) clearTimeout(idleTimer.current);
+          // Don't downgrade status if we're already speaking or preparing a response
+          if (orbState === 'speaking') return;
           setOrbState('processing');
           setStatusLabel('THINKING...');
           break;
 
         case 'loading':
-          // Tool in progress — show in status and add a subtle chat indicator
+          clearSpeakingWatchdog();
           if (idleTimer.current) clearTimeout(idleTimer.current);
+          if (orbState === 'speaking') return;
           setOrbState('processing');
           setStatusLabel(msg.text?.toUpperCase() || 'LOADING...');
           break;
 
         case 'speaking':
-          // Just an orb state change — the actual text comes via 'response'
           if (idleTimer.current) clearTimeout(idleTimer.current);
           setOrbState('speaking');
           setStatusLabel('RESPONDING');
+          armSpeakingWatchdog();
+          // Start clearing transcription once she speaks
+          setTimeout(() => setTranscription(''), 500);
           break;
 
         case 'response':
@@ -164,8 +224,9 @@ export default function App() {
           if (idleTimer.current) clearTimeout(idleTimer.current);
           setOrbState('speaking');
           setStatusLabel('RESPONDING');
+          armSpeakingWatchdog();
           if (msg.text) {
-            setMessages(prev => [...prev, {
+            setMessages(prev => [...prev.filter(m => m.id !== 'temp-processing'), {
               id: (Date.now() + 1).toString(),
               role: 'assistant',
               text: msg.text!,
@@ -174,7 +235,14 @@ export default function App() {
           }
           break;
 
+        case 'turn_completed':
+          if (msg.turn_id && activeTurnRef.current === msg.turn_id) {
+            activeTurnRef.current = null;
+          }
+          break;
+
         case 'clarify':
+          clearSpeakingWatchdog();
           if (idleTimer.current) clearTimeout(idleTimer.current);
           setOrbState('processing');
           setStatusLabel('NEEDS YOUR INPUT');
@@ -184,6 +252,7 @@ export default function App() {
           break;
 
         case 'error':
+          clearSpeakingWatchdog();
           if (idleTimer.current) clearTimeout(idleTimer.current);
           setOrbState('idle');
           setStatusLabel('ERROR');
@@ -207,6 +276,7 @@ export default function App() {
     return () => {
       window.yukiAPI?.removeStateListener();
       if (idleTimer.current) clearTimeout(idleTimer.current);
+      if (speakingWatchdog.current) clearTimeout(speakingWatchdog.current);
     };
   }, []);
 
@@ -248,10 +318,17 @@ export default function App() {
   // ── Actions ──────────────────────────────────────────────────────────────
   const handleTrigger = useCallback(() => {
     if (window.yukiAPI) {
-      window.yukiAPI.trigger();
+      if (orbState === 'listening') {
+        window.yukiAPI.cancelTrigger();
+      } else {
+        window.yukiAPI.trigger();
+      }
     } else {
       // Browser demo
-      if (orbState === 'idle') {
+      if (orbState === 'listening') {
+        setOrbState('idle');
+        setStatusLabel(config.idleLabel);
+      } else if (orbState === 'idle') {
         setOrbState('listening');
         setStatusLabel('LISTENING...');
         setTimeout(() => {
@@ -335,6 +412,7 @@ export default function App() {
     return (
       <MiniWidget 
         orbState={orbState}
+        onTrigger={handleTrigger}
         onExpand={() => {
           setIsMiniMode(false);
           window.yukiAPI?.setMode?.('full');
