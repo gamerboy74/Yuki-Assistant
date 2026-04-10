@@ -70,7 +70,7 @@ def _enrich_live_query(query: str) -> str:
     """Bias live sports queries toward fresher authoritative score sources."""
     q = (query or "").strip()
     ql = q.lower()
-    if "ipl" in ql and ("score" in ql or "live" in ql or "match" in ql):
+    if "ipl" in ql and ("score" in ql or "live" in ql or "match" in ql or "life" in ql):
         return f"{q} live score today site:espncricinfo.com OR site:cricbuzz.com"
     return q
 
@@ -217,19 +217,11 @@ def dispatch_tool(tool_name: str, arguments: str | dict) -> str:
         elif tool_name == "read_file":
             return _read_file(params.get("path", ""))
 
-        elif tool_name == "write_file":
+        elif tool_name in ("write_file", "design_web_page"):
             return _write_file(
                 path=params.get("path", ""),
                 content=params.get("content", ""),
                 mode=params.get("mode", "overwrite"),
-            )
-
-        elif tool_name == "design_web_page":
-            # High-level design tool: essentially a write_file but logic can be added here
-            return _write_file(
-                path=params.get("path", ""),
-                content=params.get("content", ""),
-                mode="overwrite"
             )
 
         elif tool_name == "play_youtube":
@@ -242,26 +234,13 @@ def dispatch_tool(tool_name: str, arguments: str | dict) -> str:
             return result
 
         elif tool_name == "open_app":
-            # Universal App Opener
+            # Universal App Opener — uses executor.APP_MAP as single source of truth
+            from backend.executor import APP_MAP
             name = params.get("name", "").strip().lower()
             if not name:
                 return "No app name provided."
 
-            # Premium Alias Map
-            aliases = {
-                "chrome": "chrome", "google chrome": "chrome",
-                "edge": "msedge", "microsoft edge": "msedge",
-                "browser": "chrome",
-                "notepad": "notepad", "calculator": "calc",
-                "spotify": "spotify", "discord": "discord",
-                "vlc": "vlc", "paint": "mspaint",
-                "whatsapp": "whatsapp", "telegram": "telegram",
-                "explorer": "explorer", "files": "explorer",
-                "code": "code", "vscode": "code",
-                "terminal": "wt", "cmd": "cmd",
-                "control panel": "control", "task manager": "taskmgr",
-            }
-            target = aliases.get(name, name).strip()
+            target = APP_MAP.get(name, name).strip()
 
             if not target:
                 return "No app name provided."
@@ -509,60 +488,55 @@ def _read_file(path: str) -> str:
         return f"Error reading file '{path}': {str(e)[:200]}"
 
 
+
 def _write_file(path: str, content: str, mode: str = "overwrite") -> str:
     """Write or append content to a file. Auto-launches HTML designs."""
     import os
     import webbrowser
     import time
     from pathlib import Path
-    
+
     # 1. Fallback for empty path
     if not path:
         import winreg
         try:
-            # Most reliable way on Windows: Query the registry for the real Desktop path
             key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
                 reg_path, _ = winreg.QueryValueEx(key, "Desktop")
-                # Expand environment variables like %USERPROFILE%
                 desktop = Path(os.path.expandvars(reg_path))
         except Exception:
-            # Universal fallback
             home = Path(os.path.expanduser("~"))
             desktop = home / "OneDrive" / "Desktop"
             if not desktop.exists():
                 desktop = home / "Desktop"
-        
+
         target_dir = desktop / "Yuki_Designs"
         target_dir.mkdir(parents=True, exist_ok=True)
         path = target_dir / f"design_{int(time.time())}.html"
     else:
         path = Path(path).resolve()
-        
+
     if not content:
         return "No content to write."
-    
+
     try:
-        # Safety check: restrict to user profile
         user_home = Path(os.path.expanduser("~")).resolve()
         if user_home not in path.parents and path != user_home:
             return f"Access denied: path '{path}' is outside your home directory."
 
-        # Create parent directories if needed
         path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         write_mode = "a" if mode == "append" else "w"
         with open(path, write_mode, encoding="utf-8") as f:
             f.write(content)
-        
-        # 2. Auto-launch for web designs
+
         if path.suffix.lower() in (".html", ".htm"):
             webbrowser.open(f"file:///{path}")
-            return f"Design complete! I've saved it to {path} and opened it in your browser."
+            return f"Design complete! Saved to {path} and opened in browser."
 
         action = "Appended to" if mode == "append" else "Written"
         return f"{action} '{path.name}' successfully."
-    
+
     except Exception as e:
         logger.error(f"[DISPATCH] write_file failed: {e}")
         return f"Error writing file: {str(e)[:150]}"

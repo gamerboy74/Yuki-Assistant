@@ -16,7 +16,6 @@ from backend.config import cfg
 from backend.utils.monitoring import get_system_stats
 from backend.core.orchestrator import YukiOrchestrator
 from backend.speech.synthesis import speak
-from backend.speech.synthesis import speak
 from backend import memory as mem
 
 logger = get_logger(__name__)

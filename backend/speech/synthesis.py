@@ -208,36 +208,33 @@ def _normalize_text(text: str) -> str:
 
 # ── Core async speak ──────────────────────────────────────────────────────────
 
+async def synthesize_to_file_async(text: str) -> str | None:
+    """Generate audio for text and save to a temporary file, returning the path."""
+    text = _normalize_text(text)
+    tmp_path = os.path.join(tempfile.gettempdir(), f"yuki_tts_{uuid.uuid4().hex}.mp3")
+
+    audio_ready = False
+    if ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID:
+        loop = asyncio.get_event_loop()
+        audio_ready = await loop.run_in_executor(None, _speak_elevenlabs, text, tmp_path)
+
+    if not audio_ready:
+        audio_ready = await _speak_edge_async(text, tmp_path)
+
+    if audio_ready:
+        return tmp_path
+    return None
+
 async def _speak_async(text: str) -> None:
     if not _ensure_mixer():
         _fallback_speak(text)
         return
 
-    # Expert Normalization Layer
-    text = _normalize_text(text)
+    tmp_path = await synthesize_to_file_async(text)
 
-    # UUID name → zero collision risk when speak_async fires multiple threads
-    tmp_path = os.path.join(tempfile.gettempdir(), f"yuki_tts_{uuid.uuid4().hex}.mp3")
-
-    audio_ready = False
-
-    # 1. Try ElevenLabs first (runs in thread to avoid blocking asyncio loop)
-    if ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID:
-        loop = asyncio.get_event_loop()
-        audio_ready = await loop.run_in_executor(None, _speak_elevenlabs, text, tmp_path)
-
-    # 2. Fallback to edge-tts
-    if not audio_ready:
-        audio_ready = await _speak_edge_async(text, tmp_path)
-
-    # 3. Last resort — pyttsx3
-    if not audio_ready:
+    if not tmp_path:
         logger.error("All TTS engines failed — falling back to pyttsx3")
         _fallback_speak(text)
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
         return
 
     try:

@@ -60,7 +60,7 @@ class YukiOrchestrator:
         
         # Proactive Agent (Autonomous Health)
         def sync_speak(msg):
-            asyncio.run_coroutine_threadsafe(self._speak_with_interrupt(msg), asyncio.get_event_loop())
+            asyncio.run_coroutine_threadsafe(self._speak_alert(msg), asyncio.get_event_loop())
         
         self.proactive = ProactiveAgent(speak_fn=sync_speak, send_fn=self._emit)
 
@@ -281,30 +281,34 @@ class YukiOrchestrator:
         if emit_transcript:
             self._emit("transcript", turn_id=turn_id, text=transcript)
 
-        # Start background playback loop
+        # Start parallel background synthesis and playback queues
         self.stop_playback_event.clear()
-        self._audio_queue = asyncio.Queue()
+        self._synth_queue = asyncio.Queue()
+        self._play_queue = asyncio.Queue()
+        
+        self._synth_task = asyncio.create_task(self._synth_worker(turn_id))
         self._playback_task = asyncio.create_task(self._audio_playback_worker(turn_id))
         
         has_native_audio = False
         async for event in self.brain_stream(transcript):
             if event["type"] == "audio_chunk":
-                # Stream multimodal audio to queue immediately
+                # Stream multimodal audio directly to synth queue
                 has_native_audio = True
-                await self._audio_queue.put({"type": "native", "data": event["value"]})
+                await self._synth_queue.put({"type": "native", "data": event["value"]})
             elif event["type"] == "text_sentence":
                 text = event["value"]
                 # Only queue fallback TTS if we haven't seen native audio yet
                 if not has_native_audio:
-                    await self._audio_queue.put({"type": "text", "data": text})
+                    await self._synth_queue.put({"type": "text", "data": text})
             elif event["type"] == "tool_start":
                 self._emit("loading", turn_id=turn_id, text=f"{event['value']}...")
             elif event["type"] == "final_response":
                 final_text = event["value"]
                 self._emit("response", turn_id=turn_id, text=final_text)
         
-        # Signal end of stream to playback worker
-        await self._audio_queue.put(None)
+        # Signal end of stream to synth worker
+        await self._synth_queue.put(None)
+        await self._synth_task
         await self._playback_task
 
     def _extract_inline_command(self, transcript: str) -> str:
@@ -337,24 +341,95 @@ class YukiOrchestrator:
         
         self._mixer_ready = True
 
+    async def _synth_worker(self, turn_id: str):
+        """Pre-fetches text from the brain and synthesizes it to files in parallel with playback."""
+        try:
+            from backend.speech import synthesis as cloud_tts
+            while True:
+                item = await self._synth_queue.get()
+                if item is None:
+                    # Signal EOF to playback queue
+                    await self._play_queue.put(None)
+                    break
+                    
+                if self.stop_playback_event.is_set():
+                    continue
+
+                if item["type"] == "native":
+                    await self._play_queue.put(item)
+                elif item["type"] == "text":
+                    text = item["data"]
+                    if self.use_elevenlabs_tts:
+                        try:
+                            # Pre-fetch cloud TTS to a file
+                            file_path = await cloud_tts.synthesize_to_file_async(text)
+                            if file_path:
+                                await self._play_queue.put({"type": "file", "data": file_path})
+                                continue
+                        except Exception as e:
+                            logger.warning(f"Synth failed, falling back to local: {e}")
+                    
+                    # Local Kokoro generator doesn't do files right now, 
+                    # so we just push the text to be rendered inline.
+                    await self._play_queue.put({"type": "text_local", "data": text})
+
+        except Exception as e:
+            logger.error(f"Synth worker failed: {e}")
+            await self._play_queue.put(None)
+
     async def _audio_playback_worker(self, turn_id: str):
-        """Background task that consumes audio/text chunks and plays them sequentially."""
+        """Background task that pulls synthesized audio chunks/files and plays zero-gap."""
         try:
             while True:
-                item = await self._audio_queue.get()
+                item = await self._play_queue.get()
                 if item is None:
                     break
+                    
                 if self.stop_playback_event.is_set():
-                    continue # Drain queue if interrupted
+                    if item["type"] == "file":
+                        try: os.unlink(item["data"])
+                        except: pass
+                    continue
+                
+                self.is_speaking = True
                 
                 if item["type"] == "native":
                     await self._play_native_chunk(item["data"])
-                elif item["type"] == "text":
-                    await self._speak_with_interrupt(item["data"], turn_id=turn_id)
+                elif item["type"] == "file":
+                    file_path = item["data"]
+                    await self._play_file_with_interrupt(file_path)
+                    try: os.unlink(file_path)
+                    except: pass
+                elif item["type"] == "text_local":
+                    # Kokoro streams directly
+                    await self._speak_local_with_interrupt(item["data"], turn_id=turn_id)
         except Exception as e:
             logger.error(f"Audio playback worker failed: {e}")
         finally:
             self.is_speaking = False
+
+    async def _play_file_with_interrupt(self, path: str):
+        """Play an mp3/wav file via pygame, yielding to asyncio loop allowing interrupt checks."""
+        try:
+            import pygame
+            self._ensure_mixer()
+            
+            # Neural Pre-warm to close the latency gap
+            import numpy as np
+            pre_warm_samples = int(44100 * 0.15)
+            silence = np.zeros((pre_warm_samples, 2), dtype=np.int16)
+            pygame.mixer.Sound(buffer=silence).play()
+
+            pygame.mixer.music.load(path)
+            pygame.mixer.music.play()
+            
+            while pygame.mixer.music.get_busy():
+                if self.stop_playback_event.is_set():
+                    pygame.mixer.music.stop()
+                    break
+                await asyncio.sleep(0.01)
+        except Exception as e:
+            logger.error(f"Play file failed: {e}")
 
     async def _play_native_chunk(self, chunk: bytes):
         """Fixes Gemini's 24kHz vs 16kHz pitch issue and plays a raw chunk."""
@@ -364,11 +439,8 @@ class YukiOrchestrator:
         try:
             # Resample 24k (Gemini) -> 44100k (Universal Mixer)
             import audioop
-            # Note: We now output 2 channels (Stereo) for the 44100 mixer.
             resampled, _ = audioop.ratecv(chunk, 2, 1, 24000, 44100, None)
             
-            # If mixer is stereo but source is mono, pygame needs it explicitly or 
-            # we need to double the samples. SDL usually handles this if channels=2 was set in init.
             sound = pygame.mixer.Sound(buffer=resampled)
             channel = sound.play()
             while channel.get_busy():
@@ -379,24 +451,23 @@ class YukiOrchestrator:
         except Exception as e:
             logger.error(f"Native chunk playback failed: {e}")
 
-    async def _speak_with_interrupt(self, text: str, turn_id: str | None = None):
-        """Plays text fallback (Cloud/Local) but lets VAD stop it halfway."""
-        # 1. Cloud: Premium Cloud (ElevenLabs)
-        if self.use_elevenlabs_tts:
-            try:
-                from backend.speech import synthesis as cloud_tts
-                speak_task = asyncio.create_task(asyncio.to_thread(cloud_tts.speak, text))
-                while not speak_task.done():
-                    await asyncio.sleep(0.05)
-                    if self.stop_playback_event.is_set():
-                        await asyncio.to_thread(cloud_tts.stop_speech)
-                        break
-                await speak_task
-                return
-            except Exception as e:
-                logger.warning(f"ElevenLabs failed: {e}. Falling back to Local.")
+    async def _speak_alert(self, text: str):
+        """Dedicated immediate playback path for proactive agent alerts."""
+        try:
+            from backend.speech import synthesis as cloud_tts
+            if self.use_elevenlabs_tts:
+                path = await cloud_tts.synthesize_to_file_async(text)
+                if path:
+                    await self._play_file_with_interrupt(path)
+                    try: os.unlink(path)
+                    except: pass
+                    return
+            await self._speak_local_with_interrupt(text)
+        except Exception as e:
+            logger.error(f"Alert speak failed: {e}")
 
-        # 2. Local: Tertiary Local HP (Kokoro or Edge-TTS)
+    async def _speak_local_with_interrupt(self, text: str, turn_id: str | None = None):
+        """Plays local TTS (Kokoro/Edge) handling interruptions."""
         try:
             import pygame
             self._ensure_mixer()
@@ -407,7 +478,7 @@ class YukiOrchestrator:
                 if self.stop_playback_event.is_set():
                     break
             
-            if not self.stop_playback_event.is_set():
+            if not self.stop_playback_event.is_set() and audio_chunks:
                 full_audio = b"".join(audio_chunks)
                 sound = pygame.mixer.Sound(buffer=full_audio)
                 channel = sound.play()
@@ -418,7 +489,7 @@ class YukiOrchestrator:
                         break
                     await asyncio.sleep(0.01)
         except Exception as local_err:
-            logger.error(f"All TTS paths failed: {local_err}")
+            logger.error(f"Local TTS path failed: {local_err}")
 
     def stop(self):
         """Standard shutdown procedure."""

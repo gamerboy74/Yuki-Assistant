@@ -275,7 +275,11 @@ def context_block() -> str:
         recent = [m["text"] for m in mems[-8:]]
         parts.append("Memories: " + " | ".join(recent))
 
-    return "\n".join(parts) if parts else ""
+    result = "\n".join(parts) if parts else ""
+    # Hard cap to prevent token bloat — system prompt must stay compact
+    if len(result) > 300:
+        result = result[:297] + "..."
+    return result
 
 
 def get_greeting() -> str:
