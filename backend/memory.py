@@ -5,7 +5,7 @@ Two-layer memory:
   1. Long-term:  JSON file on disk (survives restarts). Stores user profile +
                  facts the user explicitly asked Yuki to remember.
   2. Short-term: In-process ring of the last N conversation turns (already in
-                 brain_ollama._history, but this module provides summaries for
+                 brain.ollama_brain._history, but this module provides summaries for
                  the system prompt).
 
 Memory is loaded once at import and flushed to disk after every write.
@@ -15,7 +15,7 @@ Public API
 ----------
   get_user()         → dict of user profile fields
   set_user(key, val) → persist a profile field (name, location, age, …)
-  remember(text)     → add a free-form memory fact
+  save_fact(text)    → add a free-form memory fact
   forget(text)       → fuzzy-delete the closest matching memory
   recall(query)      → fuzzy-search memories, return matching list
   forget_all()       → wipe everything (keeps structure intact)
@@ -124,7 +124,7 @@ def set_preference(category: str, value: str) -> None:
     logger.info(f"[MEMORY] Preference [{category}] = {value!r}")
 
 
-def remember(text: str, tags: list[str] | None = None) -> str:
+def save_fact(text: str, tags: list[str] | None = None) -> str:
     """
     Store a free-form memory fact.
     Returns a confirmation string suitable for TTS.
@@ -143,7 +143,7 @@ def remember(text: str, tags: list[str] | None = None) -> str:
         if len(_store["memories"]) > 200:
             _store["memories"] = _store["memories"][-200:]
         _save(_store)
-    logger.info(f"[MEMORY] Stored: {text!r}")
+    logger.info(f"[MEMORY] Saved: {text!r}")
     return f"Got it, I'll remember that."
 
 
@@ -247,38 +247,53 @@ def mark_reminder_done(reminder_id: str) -> None:
 
 def context_block() -> str:
     """
-    Returns a compact memory summary string for injection into the LLM system prompt.
-    Kept short (<300 chars) to avoid bloating the context window.
+    Returns a structured context block for high-attention LLM injection.
+    Separates user identity, preferences, and long-term facts.
     """
     with _LOCK:
         user = _store["user"]
         mems = _store["memories"]
+        session_count = _store.get("session_count", 1)
 
-    parts: list[str] = []
+    sections: list[str] = []
+    
+    # Session Header
+    sections.append(f"[METADATA]\nSession #: {session_count}")
 
-    # User profile
-    if user.get("name"):
-        parts.append(f"User name: {user['name']}")
-    if user.get("location"):
-        parts.append(f"Location: {user['location']}")
-    if user.get("occupation"):
-        parts.append(f"Occupation: {user['occupation']}")
+    # User Profile (The core identity)
+    profile_parts = []
+    if user.get("name"): profile_parts.append(f"Name: {user['name']}")
+    if user.get("location"): profile_parts.append(f"Loc: {user['location']}")
     if user.get("preferences"):
-        prefs = ", ".join(f"{k}={v}" for k, v in list(user["preferences"].items())[:5])
-        parts.append(f"Preferences: {prefs}")
-    if user.get("details"):
-        details = "; ".join(f"{k}: {v}" for k, v in list(user["details"].items())[:3])
-        parts.append(details)
+        prefs = ", ".join(f"{k}:{v}" for k, v in list(user["preferences"].items())[:8])
+        profile_parts.append(f"Prefs: {prefs}")
+    
+    if profile_parts:
+        sections.append("[USER_PROFILE]\n" + "\n".join(profile_parts))
 
-    # Recent memories (last 8)
+    # Neural Memories (Long-term facts)
     if mems:
-        recent = [m["text"] for m in mems[-8:]]
-        parts.append("Memories: " + " | ".join(recent))
+        # Show last 10 memories for richer context
+        memory_lines = []
+        now = datetime.datetime.now()
+        for m in mems[-10:]:
+            # Add relative time if possible
+            try:
+                ts = datetime.datetime.fromisoformat(m["created_at"])
+                delta = now - ts
+                if delta.days > 0: time_str = f"{delta.days}d ago"
+                elif delta.seconds > 3600: time_str = f"{delta.seconds//3600}h ago"
+                else: time_str = "recent"
+                memory_lines.append(f"- ({time_str}) {m['text']}")
+            except:
+                memory_lines.append(f"- {m['text']}")
+        
+        sections.append("[NEURAL_MEMORIES]\n" + "\n".join(memory_lines))
 
-    result = "\n".join(parts) if parts else ""
-    # Hard cap to prevent token bloat — system prompt must stay compact
-    if len(result) > 300:
-        result = result[:297] + "..."
+    result = "\n\n".join(sections)
+    # Hard cap to prevent context bloat
+    if len(result) > 400:
+        result = result[:397] + "..."
     return result
 
 

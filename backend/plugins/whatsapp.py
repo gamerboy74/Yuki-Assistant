@@ -11,7 +11,7 @@ logger = get_logger(__name__)
 
 class WhatsAppMessagePlugin(Plugin):
     name = "send_whatsapp"
-    description = "Send a text message to a contact via WhatsApp Desktop app. Search by contact name — NEVER ask for phone number."
+    description = "Send WhatsApp text to contact name."
     parameters = {
         "contact": {
             "type": "string",
@@ -55,7 +55,7 @@ class WhatsAppMessagePlugin(Plugin):
 
 class WhatsAppFilePlugin(Plugin):
     name = "send_whatsapp_file"
-    description = "Send a file (document, ppt, pdf, image) to a contact via WhatsApp Desktop."
+    description = "Send file to WhatsApp contact."
     parameters = {
         "contact": {
             "type": "string",

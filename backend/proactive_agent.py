@@ -28,24 +28,17 @@ POLL_INTERVAL  = 30
 # Minimum seconds between repeating the same alert type
 ALERT_COOLDOWN = 300  # 5 minutes
 
-try:
-    import psutil
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
-    logger.warning("psutil not installed — proactive system monitoring disabled.")
+from backend.utils.monitoring import PSUTIL_AVAILABLE, psutil
 
 class ProactiveAgent:
     """Background thread that monitors system health and fires Yuki alerts."""
 
-    def __init__(self, speak_fn, send_fn):
+    def __init__(self, fire_alert_fn):
         """
         Args:
-            speak_fn: Yuki's speak() function to voice alerts
-            send_fn:  Yuki's send() function to push UI messages
+            fire_alert_fn: Orchestrator function to handle UI + Speech thread-safely
         """
-        self._speak = speak_fn
-        self._send  = send_fn
+        self._fire_alert_callback = fire_alert_fn
         self._stop  = threading.Event()
         self._last_alert: dict[str, float] = {}   # alert_type → last_fired_timestamp
         self._thread: threading.Thread | None = None
@@ -165,16 +158,7 @@ class ProactiveAgent:
             return
 
         self._last_alert[alert_type] = now
-        logger.info(f"[PROACTIVE] Firing alert: {alert_type}")
+        logger.info(f"[PROACTIVE] Triggering orchestrated alert: {alert_type}")
 
-        # Announce visually in UI
-        self._send("speaking")
-        self._send("response", text=f"⚠️ {message}")
-
-        # Speak it out loud
-        try:
-            self._speak(message)
-        except Exception as e:
-            logger.error(f"[PROACTIVE] TTS error on alert: {e}")
-
-        self._send("idle")
+        # Delegate everything to the orchestrator for thread-safety
+        self._fire_alert_callback(message)

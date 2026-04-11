@@ -6,7 +6,7 @@
  * Reads the assistant name from yuki.config.json via useConfig.
  */
 import { useEffect } from 'react';
-import { useConfig } from '../hooks/useConfig';
+import { useSettingsStore } from '../store/settingsStore';
 import type { OrbState } from '../App';
 
 interface MiniWidgetProps {
@@ -57,7 +57,11 @@ const STATE = {
 };
 
 export default function MiniWidget({ onTrigger, onExpand, onClose, orbState }: MiniWidgetProps) {
-  const { name } = useConfig();
+  const { assistantName: name, loadConfig } = useSettingsStore();
+
+  useEffect(() => {
+    loadConfig();
+  }, []);
   const s = STATE[orbState];
 
   /* Alt+Space shortcut */

@@ -1,59 +1,48 @@
-# ── Yuki Voice Assistant — Python Dependencies ────────────────────────────────
-# Install with: pip install -r requirements.txt
-# Note: on Windows, PyAudio may need: pip install pipwin && pipwin install pyaudio
+# ── Yuki Voice Assistant — High-Performance Dependencies ─────────────────────
+# Pinning versions for architectural stability and reproducibility.
 
-# ── Core: Speech Recognition (Whisper — offline, multilingual) ────────────────
-faster-whisper>=1.0.0          # Local offline STT — handles Hindi/Hinglish/English
+# ── Neural Pipelines (Kokoro / Whisper / Silero) ──────────────────────────────
+torch==2.5.1
+torchaudio==2.5.1
+onnxruntime-gpu==1.19.2
+faster-whisper==1.2.1
+silero-vad==6.2.1
+kokoro==0.9.4
+numpy>=1.24.0,<2.1.0
+soundfile>=0.12.1
 
-# ── Wake Word Detection (offline, instant) ────────────────────────────────────
-pvporcupine>=3.0.0             # Porcupine wake word — set PICOVOICE_KEY env var
-pyaudio>=0.2.14                # Microphone input
 
-# ── Fallback STT (Google, requires internet) ──────────────────────────────────
-SpeechRecognition>=3.8.1       # Fallback wake word when pvporcupine unavailable
+# ── Brains & Connectivity ─────────────────────────────────────────────────────
+google-genai==0.4.0
+openai>=1.26.0
 
-# ── Text-to-Speech (Microsoft neural voices, free) ───────────────────────────
-edge-tts>=6.1.9                # Premium neural TTS via Edge browser API
-pygame>=2.5.0                  # Audio playback for edge-tts output
+duckduckgo-search>=6.3.0
+requests>=2.31.0
+python-dotenv>=1.0.0
 
-# ── AI Brain ──────────────────────────────────────────────────────────────────
-google-genai>=0.1.0            # Google Gemini 3.0 SDK
-openai>=1.0.0                  # GPT-4o for intent parsing + conversation
-duckduckgo-search>=6.3.0       # Live internet search tool backend
-ddgs>=9.0.0                    # Preferred DuckDuckGo search package (new name)
+# ── Speech Infrastructure & Audio ─────────────────────────────────────────────
+pyaudio==0.2.14
+pvporcupine>=3.0.0
+SpeechRecognition>=3.10.1
+edge-tts==6.1.9
+pygame>=2.5.2
+pycaw>=20230407
+pywin32>=306
 
-# ── Configuration ─────────────────────────────────────────────────────────────
-python-dotenv>=0.19.0          # Load .env for API keys
+# ── OS Interface & Automation ─────────────────────────────────────────────────
+pyautogui>=0.9.54
+playwright>=1.41.2
+psutil>=5.9.8
+keyboard>=0.13.5
+pywinauto>=0.6.8
+Pillow>=10.2.0
 
-# ── OS Actions & Automation ───────────────────────────────────────────────────
-pyautogui>=0.9.54              # Type text, take screenshots
-playwright>=1.40.0             # WhatsApp Web + YouTube automation
-psutil>=5.9.0                  # Battery, CPU, RAM system info
+# ── File Processing ───────────────────────────────────────────────────────────
+python-docx>=1.1.0
+python-pptx>=0.6.23
+pdfplumber>=0.10.3
 
-# ── Optional / Legacy (kept for backward compat) ─────────────────────────────
-pyttsx3>=2.90                  # Fallback TTS if edge-tts fails
-PyQt6>=6.4.0                   # Legacy GUI support (not used in new assistant.py)
-schedule>=1.2.0                # Task scheduling
-# -- High-Performance Streaming Pipeline -----------------------------------------
-kokoro>=0.1.0
-onnxruntime-gpu>=1.16.0
-silero-vad>=5.1.0
-torch>=2.2.0
-torchaudio>=2.2.0
-soundfile>=0.12.0
-numpy>=1.24.0
-pytest>=8.0.0
-
-# ── Recently Added / Extracted Sub-system Dependencies ────────────────────────
-requests>=2.31.0               # ElevenLabs TTS, Weather, and general APIs
-Pillow>=10.0.0                 # Image processing for Vision Plugin
-pycaw>=20230407                # Windows Audio Volume Management
-keyboard>=0.13.5               # Low-level media and hotkey controller
-pywinauto>=0.6.8               # Native Windows UI manipulation
-pywhatkit>=5.4                 # WhatsApp Web fallback sending
-selenium>=4.15.0               # Chrome / web automation
-webdriver-manager>=4.0.0       # Auto-downloader for Selenium Chrome Drivers
-python-docx>=1.1.0             # Document text parsing
-python-pptx>=0.6.23            # Presentation text parsing
-pdfplumber>=0.10.3             # Robust PDF text and table extraction
-vosk>=0.3.45                   # Offline fallback generic speech recognition
+# ── Utilities ─────────────────────────────────────────────────────────────────
+schedule>=1.2.1
+pytest>=8.0.2
+pytest-asyncio>=0.23.5

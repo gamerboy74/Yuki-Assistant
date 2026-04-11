@@ -21,43 +21,37 @@ _RATES = {
     "gemini-1.5-pro": (3.50, 10.50),
 }
 
-def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+def calculate_cost(model: str, input_tokens: int, output_tokens: int, cached_tokens: int = 0) -> float:
     """
     Calculate the total USD cost for a given model and token count.
+    Handles context caching for Gemini/OpenAI models if provided.
     
     Args:
-        model: Model identifier (e.g., 'gpt-4o-mini')
-        input_tokens: Number of prompt tokens
-        output_tokens: Number of completion tokens
-        
-    Returns:
-        float: Total USD cost
+        model: Model identifier
+        input_tokens: Regular prompt tokens
+        output_tokens: Completion tokens
+        cached_tokens: Tokens retrieved from context cache (billed lower)
     """
-    # Normalize model name for lookup
     m = model.lower()
+    if "/" in m: m = m.split("/")[-1]
     
-    # Clean model name (remove vendor prefix if present)
-    if "/" in m:
-        m = m.split("/")[-1]
-    
-    # Try exact match, then versioned match
     rate = _RATES.get(m)
     if not rate:
-        # Check for model families (e.g., 'gemini-2.0' in 'gemini-2.0-flash-v1')
         for k, v in _RATES.items():
             if k in m:
                 rate = v
                 break
     
-    # Last resort: generic family fallback
     if not rate:
-        if "gemini" in m:
-            # Default to standard flash rates for any unknown Gemini
-            rate = _RATES["gemini-2.0-flash"]
-        else:
-            rate = _RATES["gpt-4o-mini"]
+        rate = _RATES["gemini-2.0-flash"] if "gemini" in m else _RATES["gpt-4o-mini"]
         
     input_rate, output_rate = rate
     
-    cost = (input_tokens / 1_000_000 * input_rate) + (output_tokens / 1_000_000 * output_rate)
-    return cost
+    # ── Expert Pricing: Cache Optimization ──
+    # Most providers (Google/Anthropic) bill cached tokens at ~25% of the base input rate.
+    cache_rate = input_rate * 0.25
+    
+    total_input_cost = (input_tokens / 1_000_000 * input_rate) + (cached_tokens / 1_000_000 * cache_rate)
+    total_output_cost = (output_tokens / 1_000_000 * output_rate)
+    
+    return total_input_cost + total_output_cost

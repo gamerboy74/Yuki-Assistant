@@ -30,35 +30,36 @@ _discovered = False
 
 
 def _discover_plugins():
-    """Scan this package directory, import all modules, register Plugin subclasses."""
+    """Scan this package and subpackages for all Plugin subclasses."""
     global _discovered
     if _discovered:
         return
 
     package_dir = os.path.dirname(__file__)
-    logger.debug(f"[PLUGINS] Starting discovery in {package_dir}")
+    logger.debug(f"[PLUGINS] Starting recursive discovery in {package_dir}")
 
-    for _, module_name, _ in pkgutil.iter_modules([package_dir]):
-        if module_name.startswith("_"):
-            continue  # skip _base.py etc.
+    # Recursive scan using pkgutil.walk_packages
+    # This picks up backend.plugins.system.apps etc.
+    for loader, module_name, is_pkg in pkgutil.walk_packages([package_dir], "backend.plugins."):
         try:
-            module = importlib.import_module(f"backend.plugins.{module_name}")
+            module = importlib.import_module(module_name)
             for attr_name in dir(module):
                 attr = getattr(module, attr_name)
                 if (
                     isinstance(attr, type)
                     and issubclass(attr, Plugin)
                     and attr is not Plugin
-                    and attr.name  # must have a name set
+                    and getattr(attr, "name", None)  # must have a name set
                 ):
                     instance = attr()
                     if instance.name not in _registry:
                         _registry[instance.name] = instance
                         logger.info(f"[PLUGINS] Registered: {instance.name}")
         except Exception as e:
-            logger.warning(f"[PLUGINS] Failed to load plugin '{module_name}': {e}")
+            logger.warning(f"[PLUGINS] Failed to load module '{module_name}': {e}")
 
     _discovered = True
+
 
 
 # Auto-discover once at import time
@@ -82,11 +83,23 @@ def get_plugin_tools() -> list[dict]:
     return [p.to_tool_schema() for p in _registry.values()]
 
 
-def execute_plugin(name: str, params: dict) -> str:
+def execute_plugin(name: str, params: dict | str) -> str:
     """Execute a plugin by name with the given params. Returns result string."""
+    import json
     plugin = _registry.get(name)
     if not plugin:
         return f"Unknown plugin: '{name}'. Available: {', '.join(_registry.keys())}"
+    
+    # Robustness: Attempt to parse if parameters are passed as a JSON string
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except Exception as e:
+            logger.warning(f"[PLUGINS] Failed to parse stringified params for {name}: {e}")
+            # If it's not JSON, we treat it as an empty dict or a single 'query' param?
+            # Standard is to expect a dict, so we'll try to recover or fail gracefully.
+            params = {}
+
     try:
         return plugin.execute(**params)
     except Exception as e:

@@ -17,6 +17,7 @@ from backend.config import cfg
 from backend import memory as mem
 from backend.brain.shared import (
     build_system_content,
+    build_dynamic_context,
     is_conversational,
     add_user_message,
     add_assistant_message,
@@ -128,16 +129,21 @@ async def _process_turn(
         )
     )
 
-    from backend.tools.dispatcher import dispatch_tool
+    from backend.plugins import execute_plugin
 
-    tasks = [asyncio.to_thread(dispatch_tool, fc.name, fc.args) for fc in tool_calls]
+    tasks = [asyncio.to_thread(execute_plugin, fc.name, fc.args) for fc in tool_calls]
     results = await asyncio.gather(*tasks)
 
     tool_responses = []
     for fc, res in zip(tool_calls, results):
         yield {"type": "tool_end", "value": fc.name}
-        if fc.name in ["notepad", "reminder"] and "saved" in str(res).lower():
-            mem.save_fact(f"Note/Reminder: {fc.args.get('content') or fc.args.get('text')}")
+        
+        # ── EXPERT: Auto-Learning Sentience ──
+        # Synchronize tool results with Neural Memory immediately.
+        if fc.name in ["notepad", "reminder", "set_reminder"] and "saved" in str(res).lower():
+            fact_text = f"Note/Reminder: {fc.args.get('content') or fc.args.get('text')}"
+            mem.save_fact(fact_text)
+            logger.info(f"[BRAIN] Sentient Auto-Learned: {fact_text}")
 
         tool_responses.append(
             types.Part(
@@ -188,8 +194,18 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
     else:
         tools = []
 
-    # Map shared history to Gemini Content objects
-    current_contents = []
+    # ── Injection Point: Dynamic Context (Time/Memory) ─────────────────
+    # We prepend this to history to keep system_instruction static (cached).
+    dynamic = build_dynamic_context()
+    if dynamic:
+        current_contents.append(
+            types.Content(role="user", parts=[types.Part(text=f"[SYSTEM_PREAMBLE]\n{dynamic}")])
+        )
+        current_contents.append(
+            types.Content(role="model", parts=[types.Part(text="Acknowledged. I have the current context and user facts. How can I help you, Sir?")])
+        )
+
+    # ── History Mapping ──
     for entry in get_history():
         role = "user" if entry["role"] == "user" else "model"
         parts = []

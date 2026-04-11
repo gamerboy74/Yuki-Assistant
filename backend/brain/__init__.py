@@ -91,11 +91,7 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
                 from backend.brain.ollama_brain import is_available as ollama_ready
                 
                 if not ollama_ready():
-                    if not is_auto:
-                        yield {"type": "final_response", "value": "Sir, the local Ollama instance is unreachable. Ensure the service is running."}
-                        return
-                    yield {"type": "loading", "text": "OLLAMA UNREACHABLE..."}
-                    continue
+                    raise BrainError("Sir, the local Ollama instance is unreachable. Ensure the service is running.", "ollama", is_transient=True)
                     
                 async for event in ollama_stream(transcript):
                     yield event
@@ -103,38 +99,39 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
                 break
 
         except Exception as e:
-            error_str = str(e).lower()
-            is_quota = any(x in error_str for x in ["429", "quota", "limit"])
+            # Handle standardized BrainError if provided, else transform generic exception
+            from backend.brain.shared import BrainError
             
-            if is_quota:
-                logger.error(f"Provider '{p}' exhausted (429/Quota).")
-                _PROVIDER_COOLDOWN[p] = time.time() + COOLDOWN_DURATION
+            if isinstance(e, BrainError):
+                be = e
+            else:
+                error_str = str(e).lower()
+                is_quota = any(x in error_str for x in ["429", "quota", "limit"])
+                be = BrainError(str(e), p, is_quota=is_quota)
+            
+            if be.is_quota:
+                logger.error(f"Provider '{be.provider}' exhausted (429/Quota).")
+                _PROVIDER_COOLDOWN[be.provider] = time.time() + COOLDOWN_DURATION
                 
                 if not is_auto:
-                    # Manual mode: VOICE MESSAGE
-                    yield {
-                        "type": "final_response",
-                        "value": f"Sir, the {p.upper()} link has reached its quota limit. I've initiated a five minute cooldown. Please switch to another brain in the dashboard."
-                    }
+                    yield {"type": "final_response", "value": f"Sir, {be.provider.upper()} link quota limit hit. 5-minute cooldown initiated."}
                     return
                 else:
-                    # Auto mode: HUD NOTIFICATION + FALLBACK
                     next_p = active_cascade[i+1].upper() if i+1 < len(active_cascade) else "FALLBACK"
-                    yield {"type": "loading", "text": f"{p.upper()} QUOTA HIT -> {next_p}..."}
-                    continue 
+                    yield {"type": "loading", "text": f"{be.provider.upper()} QUOTA -> {next_p}..."}
+                    continue
             else:
-                if "missing_scope" in error_str:
-                    yield {
-                        "type": "final_response",
-                        "value": "Sir, your OpenAI key is valid but missing the 'model.request' scope. Please check your project permissions in the OpenAI dashboard."
-                    }
+                logger.error(f"Provider '{be.provider}' failed: {be}")
+                if not is_auto:
+                    yield {"type": "final_response", "value": f"Sir, {be.provider.upper()} link failed: {str(be)[:50]}."}
                     return
-
-                yield {"type": "loading", "text": f"{p.upper()} FAILED -> FALLBACK..."}
+                
+                yield {"type": "loading", "text": f"{be.provider.upper()} FAILED -> FALLBACK..."}
                 continue
 
     if not successful and is_auto:
         yield {
             "type": "final_response",
-            "value": "Sir, total neural blackout. All automatic fallback pathways have failed. Please check your network and API keys.",
+            "value": "Sir, total neural blackout. All fallback systems are offline. Check network and API keys.",
         }
+

@@ -32,6 +32,7 @@ export interface SettingsState {
     elevenlabsBudget: number;
     vadThreshold: number;
     gainDb: number;
+    speed: number;
     spatialAudio: boolean;
     resamplingHq: boolean;
   };
@@ -88,6 +89,7 @@ const initialState: SettingsState = {
     elevenlabsBudget: 2000,
     vadThreshold: 0.65,
     gainDb: 1.0,
+    speed: 1.0,
     spatialAudio: false,
     resamplingHq: true,
   },

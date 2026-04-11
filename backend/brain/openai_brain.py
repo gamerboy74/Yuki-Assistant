@@ -18,6 +18,7 @@ from typing import AsyncGenerator
 from backend.utils.logger import get_logger
 from backend.brain.shared import (
     build_system_content,
+    build_dynamic_context,
     is_conversational,
     add_user_message,
     add_assistant_message,
@@ -87,6 +88,12 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
 
     for step in range(MAX_AGENT_STEPS):
         messages = get_openai_messages(system_content)
+        
+        # ── Injection Point: Dynamic Context (Time/Memory) ─────────────────
+        # Insert at index 1 (after static system prompt) to keep prefix cached.
+        dynamic = build_dynamic_context()
+        if dynamic:
+            messages.insert(1, {"role": "system", "content": f"[TURN_CONTEXT]\n{dynamic}"})
 
         create_kwargs = {
             "model": active_model,
@@ -170,7 +177,7 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
             ],
         }
 
-        from backend.tools.dispatcher import dispatch_tool
+        from backend.plugins import execute_plugin
 
         tool_result_msgs: list[dict] = []
         for tc in current_tool_calls.values():
@@ -178,7 +185,13 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
             if signature in executed_tool_calls:
                 res = executed_tool_calls[signature]
             else:
-                res = await asyncio.to_thread(dispatch_tool, tc["name"], tc["arguments"])
+                import json
+                try:
+                    args = json.loads(tc["arguments"])
+                except Exception as e:
+                    logger.warning(f"[OPENAI] Tool argument parse failed: {e}")
+                    args = {}
+                res = await asyncio.to_thread(execute_plugin, tc["name"], args)
                 executed_tool_calls[signature] = res
 
             tool_result_msgs.append({
@@ -187,6 +200,18 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
                 "content": str(res),
             })
             yield {"type": "tool_end", "value": tc["name"]}
+
+            # ── Sentient Auto-Learning ──
+            if tc["name"] in ["notepad", "reminder", "set_reminder"] and "saved" in str(res).lower():
+                from backend import memory as mem
+                import json
+                try: 
+                    args = json.loads(tc["arguments"])
+                except: 
+                    args = {}
+                fact_text = f"Note/Reminder: {args.get('content') or args.get('text')}"
+                mem.save_fact(fact_text)
+                logger.debug(f"[OPENAI] Auto-Learned: {fact_text}")
 
         # Record in shared history (with truncation)
         add_tool_messages(assistant_msg, tool_result_msgs)

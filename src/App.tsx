@@ -1,10 +1,12 @@
 import React, { Component, ReactNode, useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useConfig } from './hooks/useConfig';
+import { useSettingsStore } from './store/settingsStore';
 import AgentView from './pages/AgentView';
 import History from './pages/History';
 import Settings from './pages/Settings';
 import Dashboard from './pages/Dashboard';
 import MiniWidget from './components/MiniWidget';
+import { EnergyOrb } from './components/common/EnergyOrb';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 export type Page = 'chat' | 'listen' | 'history' | 'settings' | 'dashboard';
 export type OrbState = 'idle' | 'listening' | 'speaking' | 'processing';
@@ -18,6 +20,7 @@ export interface YukiMsg {
   question?: string;
   options?: string[];
   data?: any;
+  volume?: number;
 }
 
 export interface ChatMessage {
@@ -84,45 +87,22 @@ function CosmicField() {
   );
 }
 
-interface EBProps { children: ReactNode; fallback?: ReactNode; }
-interface EBState { hasError: boolean; error?: Error; }
-
-class ErrorBoundary extends Component<EBProps, EBState> {
-  constructor(props: EBProps) {
-    super(props);
-    this.state = { hasError: false };
-  }
-
-  static getDerivedStateFromError(error: Error): EBState {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('[Yuki ErrorBoundary]', error, info.componentStack);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return this.props.fallback ?? (
-        <div style={{ padding: 24, color: '#ff6b6b', fontFamily: 'monospace' }}>
-          <p>⚠ UI component crashed.</p>
-          <pre style={{ fontSize: 11, opacity: 0.7 }}>{this.state.error?.message}</pre>
-          <button onClick={() => this.setState({ hasError: false })}>Retry</button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
 
 export default function App() {
-  const config = useConfig();
+  const s = useSettingsStore();
   const [currentPage, setCurrentPage] = useState<Page>('listen');
   const [isMiniMode, setIsMiniMode] = useState<boolean>(false);
 
   // ── Shared voice / agent state ──────────────────────────────────────────
   const [orbState, setOrbState] = useState<OrbState>('idle');
-  const [statusLabel, setStatusLabel] = useState<string>(config.idleLabel);
+  const [statusLabel, setStatusLabel] = useState<string>('INIT...');
+  
+  // Update status label when store hydrates
+  useEffect(() => {
+    if (s.isHydrated && statusLabel === 'INIT...') {
+      setStatusLabel(s.idleLabel);
+    }
+  }, [s.isHydrated, s.idleLabel]);
   const [transcription, setTranscription] = useState<string>('');
   const [clarifyQuestion, setClarifyQuestion] = useState<string>('');
   const [clarifyOptions, setClarifyOptions] = useState<string[]>([]);
@@ -131,36 +111,33 @@ export default function App() {
   const speakingWatchdog = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSeqRef = useRef<number>(0);
   const activeTurnRef = useRef<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: '0',
-      role: 'assistant',
-      text: config.greeting,
-      timestamp: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  
+  // Initialize greeting after hydration
+  useEffect(() => {
+    if (s.isHydrated && messages.length === 0) {
+      setMessages([{
+        id: '0',
+        role: 'assistant',
+        text: s.greeting,
+        timestamp: new Date(),
+      }]);
+    }
+  }, [s.isHydrated, s.greeting]);
   const [systemStats, setSystemStats] = useState<any>(null);
   const [systemLogs, setSystemLogs] = useState<{id: string, text: string, ts: Date}[]>([]);
   const [sessionUsage, setSessionUsage] = useState({ input: 0, output: 0, cost: 0.0, turns: 0 });
+  const [voiceVolume, setVoiceVolume] = useState(0);
   
-  // ── Neural Provider State ──
-  const [selectedProvider, setSelectedProvider] = useState<string>(config.brain?.provider || 'auto');
-
-  // Sync state with config when it loads
+  // ── Initial Config Load ──────────────────────────────────────────────────
   useEffect(() => {
-    if (config.brain?.provider) {
-      setSelectedProvider(config.brain.provider);
-    }
-  }, [config.brain?.provider]);
+    s.loadConfig();
+  }, []);
 
   const handleProviderChange = useCallback((provider: string) => {
-    setSelectedProvider(provider);
-    if (window.yukiAPI) {
-      // Create a copy of the current config and update the provider
-      const newConfig = { ...config, brain: { ...config.brain, provider } };
-      window.yukiAPI.saveSettings(newConfig);
-    }
-  }, [config]);
+    s.updateSetting('brainProvider', provider);
+    s.saveConfig();
+  }, [s.saveConfig]);
 
   // ── IPC bridge: Python → Electron → React ────────────────────────────────
   useEffect(() => {
@@ -191,7 +168,7 @@ export default function App() {
         clearSpeakingWatchdog();
         speakingWatchdog.current = setTimeout(() => {
           setOrbState('idle');
-          setStatusLabel(config.idleLabel);
+          setStatusLabel(s.idleLabel);
           setIsHotListening(false);
         }, 15000);
       };
@@ -203,7 +180,8 @@ export default function App() {
           // Small delay before going truly idle to prevent flickering during turn transitions
           idleTimer.current = setTimeout(() => {
             setOrbState('idle');
-            setStatusLabel(config.idleLabel);
+            setVoiceVolume(0);
+            setStatusLabel(s.idleLabel);
             setIsHotListening(false);
             setClarifyQuestion('');
             setClarifyOptions([]);
@@ -234,7 +212,7 @@ export default function App() {
           if (idleTimer.current) clearTimeout(idleTimer.current);
           setOrbState('idle');
           setIsHotListening(false);
-          setStatusLabel(config.idleLabel);
+          setStatusLabel(s.idleLabel);
           break;
         case 'transcript':
           clearSpeakingWatchdog();
@@ -329,6 +307,9 @@ export default function App() {
             turns: msg.data?.turns || 0
           });
           break;
+        case 'volume_update':
+          setVoiceVolume(msg.volume || 0);
+          break;
         case 'log':
           if (msg.text) {
             setSystemLogs(prev => [
@@ -381,7 +362,7 @@ export default function App() {
     } else {
       if (orbState === 'listening') {
         setOrbState('idle');
-        setStatusLabel(config.idleLabel);
+        setStatusLabel(s.idleLabel);
       } else if (orbState === 'idle') {
         setOrbState('listening');
         setStatusLabel('LISTENING...');
@@ -389,7 +370,7 @@ export default function App() {
           setOrbState('processing');
           setStatusLabel('THINKING...');
           setTranscription('Open Google Chrome');
-          setTimeout(() => { setOrbState('idle'); setStatusLabel(config.idleLabel); }, 3500);
+          setTimeout(() => { setOrbState('idle'); setStatusLabel(s.idleLabel); }, 3500);
         }, 2500);
       }
     }
@@ -433,7 +414,7 @@ export default function App() {
               onTrigger={handleTrigger} 
               onSendMessage={handleSendMessage} 
               onChoice={handleChoice} 
-              selectedProvider={selectedProvider}
+              selectedProvider={s.brainProvider}
               onProviderChange={handleProviderChange}
             />
           </ErrorBoundary>
@@ -472,6 +453,23 @@ export default function App() {
           style={{ background: 'radial-gradient(ellipse 80% 80% at 50% 50%, transparent 40%, rgba(0,0,0,0.8) 100%)' }}
         />
         <CosmicField />
+      </div>
+
+      {/* Global Persistent Energy Orb */}
+      <div className={`fixed transition-all duration-1000 ease-[cubic-bezier(0.2,0.8,0.2,1)] z-[100] pointer-events-none flex items-center justify-center
+        ${(currentPage === 'listen' || currentPage === 'chat') 
+           ? 'top-[28px] bottom-0 left-[200px] right-0' 
+           : 'right-10 bottom-10 scale-50 opacity-40 hover:opacity-100 animate-fade-in'}`}
+      >
+        <div className="pointer-events-auto flex items-center justify-center">
+          <EnergyOrb 
+            orbState={orbState} 
+            isHotListening={isHotListening} 
+            onTrigger={handleTrigger}
+            variant={(currentPage === 'listen' || currentPage === 'chat') ? 'focus' : 'ambient'}
+            volume={voiceVolume}
+          />
+        </div>
       </div>
 
       <div className="fixed inset-0 pointer-events-none opacity-[0.025] dot-grid z-0" />

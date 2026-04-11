@@ -250,10 +250,17 @@ export const VoicesPanel = memo(({
             </div>
             <div className="space-y-4">
               <div className="flex justify-between font-label text-xs uppercase tracking-widest">
-                <span className="text-tertiary font-bold">Base Volume Gain</span>
+                <span className="text-secondary font-bold">Base Volume Gain</span>
                 <span className="text-on-surface">{state.gainDb.toFixed(1)}x</span>
               </div>
               <input className="w-full settings-range" max="2.0" min="0.1" step="0.1" style={{ accentColor: '#ff6f7e' }} type="range" value={state.gainDb} onChange={e => onUpdate('tts.gainDb', Number(e.target.value))} />
+            </div>
+            <div className="space-y-4">
+              <div className="flex justify-between font-label text-xs uppercase tracking-widest">
+                <span className="text-primary font-bold">Speech Rate</span>
+                <span className="text-on-surface">{state.speed.toFixed(2)}x</span>
+              </div>
+              <input className="w-full settings-range" max="1.5" min="0.5" step="0.05" style={{ accentColor: '#8ff5ff' }} type="range" value={state.speed} onChange={e => onUpdate('tts.speed', Number(e.target.value))} />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2">

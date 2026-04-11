@@ -49,6 +49,25 @@ except Exception as e:
 _playback_stop_event = threading.Event()
 _last_playback_time = 0.0  # Unix timestamp of last audio completion
 
+# ── Global Stop Unification ───────────────────────────────────────────────────
+_external_stop_checks = []
+
+def add_stop_condition(check_fn):
+    """Register an external boolean function to trigger audio stops."""
+    if check_fn not in _external_stop_checks:
+        _external_stop_checks.append(check_fn)
+
+def _is_stopped():
+    """Check if any stop signal is active."""
+    if _playback_stop_event.is_set():
+        return True
+    for check in _external_stop_checks:
+        try:
+            if check(): return True
+        except: pass
+    return False
+
+
 def stop_speech():
     """Interrupt and stop current audio playback immediately (Barge-in)."""
     _playback_stop_event.set()
@@ -99,15 +118,48 @@ def _play_audio_file(path: str, stop_check=None):
     pygame.mixer.music.load(path)
     pygame.mixer.music.play()
     while pygame.mixer.music.get_busy():
-        if _playback_stop_event.is_set():
+        if _is_stopped():
             pygame.mixer.music.stop()
             break
         if stop_check and stop_check():
             pygame.mixer.music.stop()
             break
-        time.sleep(0.01) # Tightened from 0.05 for seamless handoffs
+        time.sleep(0.01) 
+
     
     _last_playback_time = time.time()
+
+async def play_audio_file_async(path: str, stop_check=None):
+    """Async-friendly version of _play_audio_file."""
+    if not _ensure_mixer():
+        return
+        
+    _playback_stop_event.clear()
+    
+    # Pre-warm logic (replicated for async context)
+    now = time.time()
+    global _last_playback_time
+    if (now - _last_playback_time) > 1.0:
+        try:
+            import numpy as np
+            pre_warm_samples = int(44100 * 0.15)
+            silence = np.zeros((pre_warm_samples, 2), dtype=np.int16)
+            pygame.mixer.Sound(buffer=silence).play()
+        except: pass
+
+    pygame.mixer.music.load(path)
+    pygame.mixer.music.play()
+    while pygame.mixer.music.get_busy():
+        if _is_stopped():
+            pygame.mixer.music.stop()
+            break
+        if stop_check and stop_check():
+            pygame.mixer.music.stop()
+            break
+        await asyncio.sleep(0.01)
+    
+    _last_playback_time = time.time()
+
 
 
 # ── ElevenLabs ────────────────────────────────────────────────────────────────
@@ -259,7 +311,11 @@ async def synthesize_to_file_async(text: str, voice_id: str | None = None, provi
         # Fallback (or direct) to edge-tts
         try:
             import edge_tts
-            target_voice = voice_id or _get_edge_voice()
+            # If the current voice_id looks like an ElevenLabs ID (random chars, no hyphens),
+            # we should ignore it and use the default edge-tts voice instead.
+            is_edge_voice = voice_id and "-" in voice_id
+            target_voice = voice_id if is_edge_voice else _get_edge_voice()
+            
             communicate = edge_tts.Communicate(text, voice=target_voice)
             await communicate.save(tmp_path)
             if os.path.getsize(tmp_path) > 0:
@@ -271,7 +327,7 @@ async def synthesize_to_file_async(text: str, voice_id: str | None = None, provi
         return tmp_path
     return None
 
-async def _speak_async(text: str) -> None:
+async def _speak_async(text: str, stop_check=None) -> None:
     if not _ensure_mixer():
         _fallback_speak(text)
         return
@@ -284,7 +340,7 @@ async def _speak_async(text: str) -> None:
         return
 
     try:
-        _play_audio_file(tmp_path)
+        _play_audio_file(tmp_path, stop_check=stop_check)
     except Exception as e:
         logger.error(f"Audio playback error: {e}")
         _fallback_speak(text)
@@ -373,7 +429,7 @@ def _run_async_safe(coro):
         loop.close()
 
 
-def speak(text: str) -> None:
+def speak(text: str, stop_check=None) -> None:
     """Synchronous speak — blocks until done, but bails if TTS is stuck."""
     if not text.strip():
         return
@@ -382,7 +438,7 @@ def speak(text: str) -> None:
         logger.warning(f"TTS lock busy, skipping speak: {text}")
         return
     try:
-        _run_async_safe(_speak_async(text))
+        _run_async_safe(_speak_async(text, stop_check=stop_check))
     finally:
         _speak_lock.release()
 

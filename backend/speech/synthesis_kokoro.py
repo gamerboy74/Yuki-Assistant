@@ -5,17 +5,20 @@ import numpy as np
 import soundfile as sf
 from typing import AsyncGenerator
 from backend.utils.logger import get_logger
+from backend.config import cfg
 
 # ── Heavy Neural Imports ──
 # Moved to top level for better OS caching and parallel load stability.
 try:
     from kokoro import KPipeline
     import torch
+    import torchaudio
 except ImportError:
     # We allow the file to load for linting/type-checking, 
     # but runtime will fail gracefully in _load_engine.
     KPipeline = None
     torch = None
+    torchaudio = None
 
 logger = get_logger(__name__)
 
@@ -67,7 +70,8 @@ class KokoroEngine:
             # It returns a generator of (graphemes, phonemes, audio)
             generator = self.pipeline(
                 text, voice=voice, 
-                speed=1.1, split_pattern=r'\n+'
+                speed=cfg["tts"].get("speed", 1.0), 
+                split_pattern=r'\n+'
             )
 
             for _, _, audio in generator:
@@ -114,10 +118,26 @@ class HPVoiceSwitcher:
             tmp.close()
             try:
                 await communicate.save(tmp_path)
-                with open(tmp_path, "rb") as f:
-                    yield f.read()
+                
+                # Decode MP3 to PCM using torchaudio (already in requirements)
+                # to ensure consistency with Kokoro's 24kHz Mono PCM output.
+                waveform, sr = torchaudio.load(tmp_path)
+                
+                # 1. Resample to 24000Hz (Baseline matching Kokoro)
+                if sr != 24000:
+                    resampler = torchaudio.transforms.Resample(sr, 24000)
+                    waveform = resampler(waveform)
+                
+                # 2. Mix to Mono if needed
+                if waveform.shape[0] > 1:
+                    waveform = torch.mean(waveform, dim=0, keepdim=True)
+                
+                # 3. Convert to Int16 PCM
+                audio_int16 = (waveform[0] * 32767).numpy().astype(np.int16).tobytes()
+                yield audio_int16
+                
             except Exception as e:
-                logger.error(f"Edge-TTS Hindi failed: {e}")
+                logger.error(f"Edge-TTS Hindi conversion failed: {e}")
             finally:
                 try:
                     os.unlink(tmp_path)

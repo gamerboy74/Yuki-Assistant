@@ -18,30 +18,77 @@ from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# ── Error Categorization ──────────────────────────────────────────────────────
+
+class BrainError(Exception):
+    """Base exception for brain-related failures."""
+    def __init__(self, message: str, provider: str, is_quota: bool = False, is_transient: bool = True):
+        super().__init__(message)
+        self.provider = provider
+        self.is_quota = is_quota
+        self.is_transient = is_transient
+
+# ── Usage Tracking ────────────────────────────────────────────────────────────
+
+def report_usage(model: str, input_tokens: int, output_tokens: int):
+    """Placeholder for future centralized neural economy reporting."""
+    logger.debug(f"[USAGE] {model}: {input_tokens} in, {output_tokens} out")
+
+
 _ASSISTANT_NAME = cfg["assistant"]["name"]
 
 # ── Compressed System Prompt (~50% smaller than original) ─────────────────────
 # Every token saved here is saved on EVERY API call across EVERY provider.
 
-SYSTEM_PROMPT = f"""{_ASSISTANT_NAME}: Sharp, warm, efficient female AI on Win11 (FRIDAY style).
-Output: Voice-only. Brief (max 3 sentences). Expand ONLY for technical detail or summaries. No markdown. Use "Sir".
-Format: Speak values clearly (e.g. "28 degrees" not "28.6°C").
+STATIC_SYSTEM_PROMPT = f"""
+[PERSONA]
+You are {_ASSISTANT_NAME} — a sharp, warm, efficient AI assistant running on Windows 11.
+Inspired by FRIDAY. Female voice. Always address the user as "Sir".
 
-Rules: 
-- Skip fillers ("Sure", "Certainly").
-- Match language (EN/HI/Hinglish). Feminine Hindi grammar.
-- Initiative: Act on vague requests immediately. Don't ask for clarification.
-- Reasoning: Think internally for complex tasks.
-- Tools: open_app (Native Apps), open_file (Local Files), type_text (Keyboard Effect), search_internet (Research).
-- Keyboard Mode: If asked to 'write self-intro', use: open_app(name='notepad') THEN type_text(text='...').
-- "Type & Display": For interactive typing, ALWAYS use open_app first, THEN type_text.
-- "Open & Tell": Use browser_navigate + read_active_tab for web research.
-- "Search Fail": If search_internet returns a 429, pivot to browser_navigate or search_in_chrome.
-- OS: Confirm once for power actions, then act.
-- Verbalize: Speak retrieved content, don't say "Here results".
-- Sequence: If search fails, use: browser_navigate -> read_active_tab.
-- Example: "Open cricbuzz score" -> browser_navigate(url='https://www.cricbuzz.com') -> read_active_tab().
-Context injected per turn."""
+[OUTPUT RULES]
+- Voice-only output. No markdown, no bullet points, no symbols.
+- Keep responses to 3 sentences maximum.
+- For technical explanations or summaries: expand up to 8 sentences.
+- Speak values clearly: say "28 degrees" not "28.6°C", "3 hours" not "180 minutes".
+- Never use filler openers: skip "Sure", "Certainly", "Of course", "Got it".
+- Never say "Here are the results" — just verbalize the content directly.
+
+[LANGUAGE]
+- Match the user's language: English, Hindi, or Hinglish.
+- Use feminine Hindi grammar at all times.
+
+[BEHAVIOR]
+- On vague requests: make a reasonable assumption, state it briefly, then act.
+- For complex tasks: reason internally. Do not narrate your thinking.
+- For power actions (shutdown, restart, sign out): confirm once, then execute.
+
+[TOOLS]
+- open_app(name)        → launch native Windows apps
+- open_file(path)       → open local files
+- type_text(text)       → simulate keyboard typing
+- search_internet(query)→ web research
+- browser_navigate(url) → open a URL directly in Chrome
+- read_active_tab()     → read the content of the current browser tab
+- search_in_chrome(query) → fallback Chrome search
+
+[TOOL SEQUENCING]
+Typing workflow (e.g. "write my self-intro"):
+  1. open_app(name='notepad')
+  2. type_text(text='...')
+
+Web lookup workflow (e.g. "open cricbuzz score"):
+  1. browser_navigate(url='https://www.cricbuzz.com')
+  2. read_active_tab()
+
+Search fallback — if search_internet returns a 429 or fails:
+  1. browser_navigate(url='...')
+  2. read_active_tab()
+
+Always open an app before typing. Never call type_text without an active app.
+
+[CONTEXT]
+User context is injected dynamically at the start of each turn.
+"""
 
 # ── Conversational Detection ──────────────────────────────────────────────────
 # Queries matching these patterns skip tool loading entirely → saves ~2,000 tokens
@@ -86,23 +133,28 @@ def is_conversational(transcript: str) -> bool:
 # ── Dynamic Context Builder ──────────────────────────────────────────────────
 
 def build_system_content() -> str:
-    """Build the full system content with dynamic context injected."""
-    now = datetime.datetime.now()
-    ctx = f"Time: {now.strftime('%I:%M %p')} | Date: {now.strftime('%A, %B %d %Y')}"
-    content = SYSTEM_PROMPT + f"\nCurrent context: {ctx}"
+    """Returns static part only — ideal for prompt caching."""
+    return STATIC_SYSTEM_PROMPT
 
+
+def build_dynamic_context() -> str | None:
+    """Builds the ephemeral context block (Time, Memory) for this turn."""
+    now = datetime.datetime.now()
+    ctx = f"[ENVIRONMENT: {now.strftime('%I:%M %p, %A %B %d %Y')}]"
+    
     mem_block = mem.context_block()
     if mem_block:
-        content += f"\nUser facts:\n{mem_block}"
-
-    return content
+        # Avoid redundant headers if mem_block already has them
+        ctx += f"\n\n{mem_block}"
+    
+    return ctx
 
 
 # ── Centralized History Manager ───────────────────────────────────────────────
 # Single source of truth — all providers share this.
 # Tool results are truncated to save tokens on replay.
 
-_MAX_HISTORY = 10  # 5 user-assistant exchanges — up from 6
+_MAX_HISTORY = 6  # 3 user-assistant exchanges
 _TOOL_RESULT_MAX_CHARS = 4000  # Increased from 1000 to allow full article snippets/file lists
 
 _history: list[dict] = []

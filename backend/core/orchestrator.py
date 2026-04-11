@@ -44,18 +44,12 @@ class YukiOrchestrator:
         self.is_speaking = False
         self.stop_playback_event = asyncio.Event()
 
-        # Wire the orchestrator's stop event to synthesis.py's stop function
-        # so barge-in halts ALL audio paths
+        # Wire the orchestrator's stop event to synthesis.py's global stop mechanism
         import backend.speech.synthesis as _synth_module
-
-        _orig_stop_set = self.stop_playback_event.set
-
-        def _patched_stop_set():
-            _synth_module.stop_speech()
-            _orig_stop_set()
-
-        self.stop_playback_event.set = _patched_stop_set
+        _synth_module.add_stop_condition(lambda: self.stop_playback_event.is_set())
+        
         self.wake_event = asyncio.Event()
+
         self.turn_lock = asyncio.Lock()
         self._mixer_ready = False
         self._brain_audio_buffer = bytearray()
@@ -77,11 +71,11 @@ class YukiOrchestrator:
         self._playback_task = None
         
         # Proactive Agent (Autonomous Health)
-        def sync_speak(msg):
-            if self.loop:
-                self.loop.call_soon_threadsafe(lambda: asyncio.create_task(self._speak_alert(msg)))
-        
-        self.proactive = ProactiveAgent(speak_fn=sync_speak, send_fn=self._emit)
+        self.proactive = ProactiveAgent(
+            fire_alert_fn=lambda msg: self.loop.call_soon_threadsafe(
+                lambda: asyncio.create_task(self.fire_proactive_alert(msg))
+            )
+        )
 
         # Tokens & Cost Tracking
         self.session_usage = {
@@ -112,27 +106,31 @@ class YukiOrchestrator:
         return f"turn-{self._turn_counter:06d}"
 
     def _emit(self, event_type: str, *, turn_id: str | None = None, **payload):
-        """Emit ordered UI event metadata to keep frontend state machine in sync."""
-        # ── Optimization: IPC Telemetry Batching ──
-        # Certain high-frequency/non-critical updates are de-prioritized to keep pipes clear.
-        self._event_seq += 1
+        """Emit UI event metadata to keep frontend state machine in sync."""
         msg = {
             "type": event_type,
-            "seq": self._event_seq,
-            "ts": time.time(),
             **payload,
         }
         if turn_id:
             msg["turn_id"] = turn_id
         
-        # Immediate dispatch for core voice state events
-        core_events = ("wake", "listening", "processing", "response", "speaking", "transcript", "idle")
-        if event_type in core_events:
-             self.send(msg)
-        else:
-            # For logs and loading, we can batch or just let it through if it's not spamming.
-            # Currently just passing through but flagged for future batching.
-            self.send(msg)
+        # Dispatch immediately
+        self.send(msg)
+
+    def _emit_volume(self, chunk: bytes):
+        """Calculates RMS volume and emits a normalized value (0.0 to 1.0) for UI sentient scaling."""
+        try:
+            # Expert: Vectorized root-mean-square for high efficiency
+            data = np.frombuffer(chunk, dtype=np.int16)
+            if len(data) == 0: return
+            
+            rms = np.sqrt(np.mean(np.square(data.astype(np.float32))))
+            # Normalize: 32768 is max for int16, but speech peaks are usually around 10000-15000
+            normalized = min(1.0, rms / 12000.0)
+            if normalized > 0.01: # Noise floor
+                self._emit("volume_update", volume=normalized)
+        except Exception as e:
+            logger.debug(f"Volume emit failed: {e}")
 
     def _log(self, text: str):
         """Send a real-time event log to the dashboard."""
@@ -385,7 +383,6 @@ class YukiOrchestrator:
 
         # Start parallel background synthesis and playback queues
         self.stop_playback_event.clear()
-        self.stop_playback_event.clear()
         
         # Capture as locals so workers use THIS turn's queues, not self's (which may be replaced)
         synth_queue = asyncio.Queue()
@@ -566,27 +563,9 @@ class YukiOrchestrator:
                 # but we can send a hint or just let the finally block in _process_turn do it.
 
     async def _play_file_with_interrupt(self, path: str):
-        """Play an mp3/wav file via pygame, yielding to asyncio loop allowing interrupt checks."""
-        try:
-            import pygame
-            self._ensure_mixer()
-            
-            # Neural Pre-warm to close the latency gap
-            import numpy as np
-            pre_warm_samples = int(44100 * 0.15)
-            silence = np.zeros((pre_warm_samples, 2), dtype=np.int16)
-            pygame.mixer.Sound(buffer=silence).play()
-
-            pygame.mixer.music.load(path)
-            pygame.mixer.music.play()
-            
-            while pygame.mixer.music.get_busy():
-                if self.stop_playback_event.is_set():
-                    pygame.mixer.music.stop()
-                    break
-                await asyncio.sleep(0.01)
-        except Exception as e:
-            logger.error(f"Play file failed: {e}")
+        """Play an mp3/wav file via unified synthesis playback."""
+        import backend.speech.synthesis as _synth_module
+        await _synth_module.play_audio_file_async(path)
 
     async def _play_native_chunk(self, chunk: bytes):
         """Fixes Gemini's 24kHz vs 16kHz pitch issue using high-speed numpy interpolation."""
@@ -609,7 +588,15 @@ class YukiOrchestrator:
                 audio_int16
             ).astype(np.int16)
             
-            sound = pygame.mixer.Sound(buffer=resampled.tobytes())
+            # --- FIXED: Mono to Stereo conversion ---
+            # Pygame mixer is initialized to 2 channels. 
+            # Playing 1D mono buffer to a 2D mixer makes it play 2x fast.
+            resampled_stereo = np.column_stack((resampled, resampled))
+            
+            # Emit volume for reactive Orb
+            self._emit_volume(resampled_stereo.tobytes())
+
+            sound = pygame.mixer.Sound(buffer=resampled_stereo.tobytes())
             channel = sound.play()
             while channel.get_busy():
                 if self.stop_playback_event.is_set():
@@ -619,21 +606,39 @@ class YukiOrchestrator:
         except Exception as e:
             logger.error(f"Native chunk playback failed: {e}")
 
-    async def _speak_alert(self, text: str):
-        """Dedicated immediate playback path for proactive agent alerts."""
+    async def fire_proactive_alert(self, message: str):
+        """
+        Main entry point for background system alerts.
+        Ensures thread-safe UI state transitions and speech.
+        """
+        turn_id = "proactive-alert"
         try:
-            self._emit("speaking")
+            # 1. Start Alert (UI)
+            self._emit("speaking", turn_id=turn_id)
+            self._emit("response", turn_id=turn_id, text=f"⚠️ {message}")
+            
+            # 2. Voice Alert
             from backend.speech import synthesis as cloud_tts
             if self.use_elevenlabs_tts:
-                path = await cloud_tts.synthesize_to_file_async(text)
+                path = await cloud_tts.synthesize_to_file_async(message)
                 if path:
                     await self._play_file_with_interrupt(path)
                     try: os.unlink(path)
                     except: pass
-                    return
-            await self._speak_local_with_interrupt(text)
+                else:
+                    await self._speak_local_with_interrupt(message, turn_id=turn_id)
+            else:
+                await self._speak_local_with_interrupt(message, turn_id=turn_id)
         except Exception as e:
-            logger.error(f"Alert speak failed: {e}")
+            logger.error(f"[ORCHESTRATOR] Proactive alert failed: {e}")
+        finally:
+            # 3. Cleanup Alert (UI)
+            self._emit("idle", turn_id=turn_id)
+            logger.info(f"[PROACTIVE] Alert finished: {message[:30]}...")
+
+    async def _speak_alert(self, text: str, turn_id: str = "system-alert"):
+        """Legacy path for immediate non-proactive alerts."""
+        await self.fire_proactive_alert(text)
 
     async def _speak_local_with_interrupt(self, text: str, turn_id: str | None = None):
         """Plays local TTS (Kokoro/Edge) handling interruptions."""
@@ -662,7 +667,13 @@ class YukiOrchestrator:
                     audio_int16
                 ).astype(np.int16)
                 
-                sound = pygame.mixer.Sound(buffer=resampled.tobytes())
+                # --- FIXED: Mono to Stereo conversion ---
+                resampled_stereo = np.column_stack((resampled, resampled))
+                
+                # Emit volume for reactive Orb scaling
+                self._emit_volume(resampled_stereo.tobytes())
+                
+                sound = pygame.mixer.Sound(buffer=resampled_stereo.tobytes())
                 channel = sound.play()
                 
                 while channel.get_busy():

@@ -58,7 +58,8 @@ DEFAULT_CONFIG = {
         "provider": "elevenlabs",
         "elevenlabs_char_budget": 2000,
         "elevenlabs_api_key": "",
-        "elevenlabs_voice_id": ""
+        "elevenlabs_voice_id": "",
+        "speed": 0.9
     },
     "brain": {
         "provider": "auto"

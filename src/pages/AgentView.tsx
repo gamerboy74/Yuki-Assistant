@@ -26,40 +26,6 @@ const PROVIDER_CONFIG: Record<string, { label: string, color: string, icon: stri
   ollama: { label: 'Local Link', color: '#d946ef', icon: 'hub' },
 };
 
-const STATE = {
-  idle: {
-    label: 'YUKI.SYS',
-    iconColor: '#8ff5ff',
-    ringColor: 'rgba(143,245,255,0.18)',
-    glow: 'rgba(143,245,255,0.06)',
-    orbClass: 'orb-idle',
-    ringClass: 'ring-idle',
-  },
-  listening: {
-    label: 'LISTENING',
-    iconColor: '#8ff5ff',
-    ringColor: 'rgba(143,245,255,0.35)',
-    glow: 'rgba(143,245,255,0.14)',
-    orbClass: 'orb-listening',
-    ringClass: 'ring-listening',
-  },
-  processing: {
-    label: 'PROCESSING',
-    iconColor: '#fbbf24',
-    ringColor: 'rgba(251,191,36,0.30)',
-    glow: 'rgba(251,191,36,0.10)',
-    orbClass: 'orb-processing',
-    ringClass: 'ring-processing',
-  },
-  speaking: {
-    label: 'RESPONDING',
-    iconColor: '#ff32c8',
-    ringColor: 'rgba(255,50,200,0.35)',
-    glow: 'rgba(255,50,200,0.12)',
-    orbClass: 'orb-speaking',
-    ringClass: 'ring-speaking',
-  },
-} satisfies Record<OrbState, { label: string; iconColor: string; ringColor: string; glow: string; orbClass: string; ringClass: string }>;
 
 const ICON_MAP: Record<OrbState, string> = {
   idle: 'graphic_eq',
@@ -195,87 +161,6 @@ const MessageThread = memo(({
   </div>
 ));
 
-/* ── Energy Orb Component ── */
-const EnergyOrb = memo(({
-  orbState,
-  isHotListening,
-  onTrigger,
-}: {
-  orbState: OrbState;
-  isHotListening?: boolean;
-  onTrigger: () => void;
-}) => {
-  const s = STATE[orbState];
-
-  return (
-    <div className="relative flex items-center justify-center select-none" style={{ width: 280, height: 280 }}>
-      {/* Ambient glow */}
-      <div
-        className="absolute inset-0 rounded-full blur-3xl transition-all duration-1000"
-        style={{ background: s.glow, transform: 'scale(1.6)' }}
-      />
-
-      {/* Ripple rings */}
-      <div className={`absolute inset-0 rounded-full border-2 transition-all duration-700 ${s.ringClass}`}
-        style={{ borderColor: s.ringColor }} />
-      <div className={`absolute rounded-full border transition-all duration-700 ${s.ringClass}`}
-        style={{ inset: -20, borderColor: s.ringColor, opacity: 0.5 }} />
-      <div className={`absolute rounded-full border transition-all duration-700 ${s.ringClass}`}
-        style={{ inset: -44, borderColor: s.ringColor, opacity: 0.2 }} />
-
-      <button
-        onClick={onTrigger}
-        aria-label={`Voice agent — ${orbState}`}
-        className={`relative z-10 rounded-full overflow-hidden focus:outline-none active:scale-95 transition-transform duration-200 ${s.orbClass}`}
-        style={{ width: 220, height: 220 }}
-      >
-        <img 
-          src={energySphere} 
-          alt="" 
-          draggable={false}
-          className="absolute inset-0 w-full h-full object-cover rounded-full pointer-events-none orb-img" 
-        />
-        <div className="absolute inset-0 rounded-full orb-overlay pointer-events-none" />
-        
-        {/* Scan-line texture for depth */}
-        <div
-          className="absolute inset-0 rounded-full pointer-events-none opacity-[0.04]"
-          style={{
-            backgroundImage: 'repeating-linear-gradient(0deg, #fff 0px, #fff 1px, transparent 1px, transparent 3px)',
-          }}
-        />
-
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="w-16 h-16 rounded-full flex items-center justify-center"
-            style={{ 
-              background: 'rgba(0,0,0,0.45)', 
-              backdropFilter: 'blur(12px)', 
-              border: '1px solid rgba(255,255,255,0.15)', 
-              boxShadow: `0 0 30px ${s.iconColor}40` 
-            }}>
-            <span 
-              className="material-symbols-outlined text-3xl" 
-              style={{ 
-                color: isHotListening ? '#8ff5ff' : s.iconColor, 
-                filter: `drop-shadow(0 0 8px ${s.iconColor})`,
-                fontVariationSettings: "'FILL' 1"
-              }}
-            >
-              {ICON_MAP[orbState]}
-            </span>
-          </div>
-        </div>
-      </button>
-
-      {/* Decorative arcs */}
-      <svg className="absolute pointer-events-none" style={{ inset: -60, width: 'calc(100% + 120px)', height: 'calc(100% + 120px)' }} viewBox="0 0 400 400">
-        <circle cx="200" cy="200" r="185" fill="none" stroke={s.ringColor} strokeWidth="0.5" strokeDasharray="6 18" className="arc-rotate" />
-        <circle cx="200" cy="200" r="196" fill="none" stroke={s.ringColor} strokeWidth="0.3" strokeDasharray="2 30" className="arc-reverse" opacity="0.5" />
-      </svg>
-    </div>
-  );
-});
-
 /* ── Neural Terminal Component ── */
 const NeuralTerminal = memo(({
   orbState,
@@ -347,6 +232,13 @@ const NeuralTerminal = memo(({
   );
 });
 
+const COLOR_MAP: Record<OrbState, string> = {
+  idle: '#8ff5ff',
+  listening: '#8ff5ff',
+  processing: '#fbbf24',
+  speaking: '#ff32c8',
+};
+
 export default function AgentView({
   viewMode,
   orbState,
@@ -377,22 +269,18 @@ export default function AgentView({
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, orbState]);
 
-  const s = STATE[orbState];
+  const activeColor = COLOR_MAP[orbState];
 
   return (
     <div className="relative flex flex-col h-full overflow-hidden bg-transparent text-white selection:bg-cyan-500/30">
-      <div className="absolute inset-0 pointer-events-none transition-all duration-1000"
-        style={{ background: `radial-gradient(ellipse 65% 50% at 50% 55%, ${s.glow}, transparent 70%)` }}
-      />
-
       <ProviderSelector selectedProvider={selectedProvider} onProviderChange={onProviderChange} />
 
       <div className={`flex-1 flex flex-col items-center justify-center transition-all duration-700 ease-out ${showChat ? 'pt-4' : 'pt-0'}`}>
-        <EnergyOrb orbState={orbState} isHotListening={isHotListening} onTrigger={onTrigger} />
+        <div style={{ width: 280, height: 280 }} /> {/* Spacer for global Orb */}
 
         <div className="mt-10 text-center pointer-events-none" style={{ animation: 'fadeUp 0.6s ease both' }}>
           <p className="text-[9px] uppercase tracking-[0.6em] text-white/25 mb-2 font-bold">Protocol Yuki</p>
-          <h2 className="text-xs font-light tracking-[0.35em] uppercase transition-all duration-500" style={{ color: isHotListening ? '#8ff5ff' : s.iconColor }}>
+          <h2 className="text-xs font-light tracking-[0.35em] uppercase transition-all duration-500" style={{ color: isHotListening ? '#8ff5ff' : activeColor }}>
             {isHotListening ? 'Ready for input…' : orbState === 'idle' ? `${greeting}, boss` : statusLabel}
           </h2>
           {transcription && (
@@ -407,7 +295,7 @@ export default function AgentView({
             <p className="text-gray-400 text-xs text-center leading-relaxed italic">"{clarifyQuestion}"</p>
             <div className="flex flex-wrap justify-center gap-2">
               {clarifyOptions.map((opt, i) => (
-                <button key={i} onClick={() => onChoice(opt)} className="px-4 py-1.5 rounded-full text-[11px] font-medium border border-white/10 bg-white/5 hover:bg-white/10 transition-all active:scale-95" style={{ color: s.iconColor }}>
+                <button key={i} onClick={() => onChoice(opt)} className="px-4 py-1.5 rounded-full text-[11px] font-medium border border-white/10 bg-white/5 hover:bg-white/10 transition-all active:scale-95" style={{ color: activeColor }}>
                   {opt}
                 </button>
               ))}

@@ -7,32 +7,54 @@ logger = get_logger(__name__)
 
 class VisionPlugin(Plugin):
     name = "analyze_screen"
-    description = "Take a screenshot of the user's current screen and answer a question about it. Examples: 'What am I looking at?', 'Explain this code', 'Summarize this page'."
+    description = "Analyze current screen or OCR/Find coordinates."
     parameters = {
+        "operation": {
+            "type": "string",
+            "description": "Task: 'analyze' (OCR/Analysis) or 'screenshot' (Save to Desktop)",
+            "required": True,
+        },
         "query": {
             "type": "string",
-            "description": "What to look for or analyze in the screenshot",
-            "required": True,
+            "description": "What to look for or analyze in the screenshot (for 'analyze')",
+            "required": False,
         },
         "find_coordinates_of": {
             "type": "string",
-            "description": "If you need to click an element, describe it here. Returns exact (x, y) pixel coordinates.",
+            "description": "Describe element to find (for 'analyze').",
             "required": False,
         }
     }
 
-    def execute(self, query: str = "Describe what is on my screen.", find_coordinates_of: str = "", **_) -> str:
+    def execute(self, operation: str = "analyze", query: str = "Describe the screen.", find_coordinates_of: str = "", **_) -> str:
+        if operation == "screenshot":
+            return self._take_screenshot()
+        return self._analyze_screen(query, find_coordinates_of)
+
+    def _take_screenshot(self) -> str:
+        try:
+            from PIL import ImageGrab
+            import datetime
+            filename = f"screenshot_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            desktop = os.path.join(os.path.expanduser("~"), "Desktop", filename)
+            screenshot = ImageGrab.grab()
+            screenshot.save(desktop)
+            return f"Screenshot saved to Desktop as {filename}."
+        except Exception as e:
+            return f"Screenshot failed: {e}"
+
+    def _analyze_screen(self, query: str, find_coordinates_of: str) -> str:
         from backend.config import cfg
         api_key = cfg.get("gemini", {}).get("google_api_key") or os.environ.get("GOOGLE_API_KEY")
         if not api_key:
-            return "Vision requires the GOOGLE_API_KEY, but it is not set in Settings or ENV."
+            return "Vision requires the GOOGLE_API_KEY."
 
         try:
             from PIL import ImageGrab
             from google import genai
             from google.genai import types
         except ImportError as e:
-            return f"Required library missing: {e}. Install via: pip install Pillow google-genai"
+            return f"Required library missing: {e}."
 
         try:
             # 1. Capture Screenshot
@@ -81,7 +103,6 @@ class VisionPlugin(Plugin):
             # 4. Handle Coordinate Logic
             if find_coordinates_of and "NOT_FOUND" not in result:
                 try:
-                    # Look for the last 'X, Y' pattern in case Gemini rambles
                     import re
                     match = re.search(r"(\d+)\s*,\s*(\d+)", result)
                     if match:
@@ -100,3 +121,17 @@ class VisionPlugin(Plugin):
         except Exception as e:
             logger.error(f"[VISION] Error: {e}")
             return f"Failed to analyze screen: {str(e)[:150]}"
+
+class AnalyzeScreenPlugin(VisionPlugin):
+    name = "analyze_screen"
+    description = "Analyze screen and answer questions."
+    parameters = {"query": {"type": "string", "description": "Question about screen", "required": True}}
+    def execute(self, query: str = "", **params) -> str:
+        return self._analyze_screen(query, params.get("find_coordinates_of", ""))
+
+class ScreenshotPlugin(VisionPlugin):
+    name = "screenshot"
+    description = "Save screenshot to Desktop."
+    parameters = {}
+    def execute(self, **params) -> str:
+        return self._take_screenshot()

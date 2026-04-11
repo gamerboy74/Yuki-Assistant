@@ -271,11 +271,12 @@ def _build_context() -> str:
     except Exception:
         pass
     try:
-        import psutil
-        batt = psutil.sensors_battery()
-        if batt:
-            plugged = "charging" if batt.power_plugged else "on battery"
-            parts.append(f"Battery: {batt.percent:.0f}% ({plugged})")
+        from backend.utils.monitoring import PSUTIL_AVAILABLE, psutil
+        if PSUTIL_AVAILABLE:
+            batt = psutil.sensors_battery()
+            if batt:
+                plugged = "charging" if batt.power_plugged else "on battery"
+                parts.append(f"Battery: {batt.percent:.0f}% ({plugged})")
     except Exception:
         pass
     return " | ".join(parts) if parts else "Windows 11"

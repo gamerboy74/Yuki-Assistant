@@ -6,7 +6,7 @@ from backend.plugins._base import Plugin
 
 class YouTubePlugin(Plugin):
     name = "play_youtube"
-    description = "Search and play a video on YouTube in the browser."
+    description = "Search and play YouTube video."
     parameters = {
         "query": {
             "type": "string",
