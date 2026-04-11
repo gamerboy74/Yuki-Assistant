@@ -61,9 +61,20 @@ _CHAT_PATTERNS = re.compile(
 
 def is_conversational(transcript: str) -> bool:
     """Return True if the transcript is purely conversational (no tools needed)."""
-    text = transcript.strip()
+    text = transcript.strip().lower()
     if len(text) < 3:
         return True
+        
+    # Hinglish/Hindi conversational patterns
+    hinglish_patterns = ["kaise ho", "kya haal", "dhanyavad", "shukriya", "kaun ho", "namaste", "namaskar"]
+    if any(h in text for h in hinglish_patterns):
+        return True
+        
+    # Negative match: if it contains skill keywords, it's NOT conversational
+    skill_keywords = ["search", "open", "close", "restart", "shutdown", "weather", "play", "set", "whatsapp", "message", "write", "read", "file", "design", "page", "banao", "likho"]
+    if any(s in text for s in skill_keywords):
+        return False
+        
     return bool(_CHAT_PATTERNS.match(text))
 
 
@@ -86,8 +97,8 @@ def build_system_content() -> str:
 # Single source of truth — all providers share this.
 # Tool results are truncated to save tokens on replay.
 
-_MAX_HISTORY = 6  # 3 user-assistant exchanges — down from 10
-_TOOL_RESULT_MAX_CHARS = 150  # Truncate tool results aggressively
+_MAX_HISTORY = 10  # 5 user-assistant exchanges — up from 6
+_TOOL_RESULT_MAX_CHARS = 1000  # Increased from 150 to prevent context loss for file/weather lists
 
 _history: list[dict] = []
 _history_lock = threading.Lock()
@@ -145,7 +156,19 @@ def clear_history() -> None:
 
 
 def _trim_history() -> None:
-    """Keep only the most recent messages. Must be called under lock."""
+    """Keep only the most recent messages, respecting tool call integrity. Must be called under lock."""
     global _history
     if len(_history) > _MAX_HISTORY * 2:
-        _history = _history[-(2 * _MAX_HISTORY):]
+        target_cut = len(_history) - (_MAX_HISTORY * 2)
+        
+        # We must NOT cut between assistant(tool_calls) and tool(result).
+        # Safe cuts are always BEFORE a 'user' message.
+        safe_cut = target_cut
+        while safe_cut > 0 and _history[safe_cut].get("role") != "user":
+            safe_cut -= 1
+            
+        if safe_cut > 0:
+            _history = _history[safe_cut:]
+        else:
+            # Fallback: if no user message found (unlikely), just keep minimum
+            _history = _history[-(_MAX_HISTORY * 2):]

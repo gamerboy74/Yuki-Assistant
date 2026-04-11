@@ -110,6 +110,7 @@ export default function App() {
   ]);
   const [systemStats, setSystemStats] = useState<any>(null);
   const [systemLogs, setSystemLogs] = useState<{id: string, text: string, ts: Date}[]>([]);
+  const [sessionUsage, setSessionUsage] = useState({ input: 0, output: 0, cost: 0.0, turns: 0 });
   
   // ── Neural Provider State ──
   const [selectedProvider, setSelectedProvider] = useState<string>(config.brain?.provider || 'auto');
@@ -289,6 +290,14 @@ export default function App() {
         case 'status':
           if (msg.data) setSystemStats(msg.data);
           break;
+        case 'usage_update':
+          setSessionUsage({
+            input: msg.data?.input || 0,
+            output: msg.data?.output || 0,
+            cost: msg.data?.cost || 0.0,
+            turns: msg.data?.turns || 0
+          });
+          break;
         case 'log':
           if (msg.text) {
             setSystemLogs(prev => [
@@ -398,7 +407,7 @@ export default function App() {
         );
       case 'history': return <History messages={messages} />;
       case 'settings': return <Settings />;
-      case 'dashboard': return <Dashboard stats={systemStats} logs={systemLogs} />;
+      case 'dashboard': return <Dashboard stats={systemStats} logs={systemLogs} usage={sessionUsage} />;
       default: return null;
     }
   };

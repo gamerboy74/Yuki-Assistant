@@ -123,14 +123,13 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
                     yield {"type": "loading", "text": f"{p.upper()} QUOTA HIT -> {next_p}..."}
                     continue 
             else:
-                logger.error(f"Provider '{p}' failed: {e}")
-                if not is_auto:
+                if "missing_scope" in error_str:
                     yield {
-                        "type": "final_response", 
-                        "value": f"Sir, I've encountered a fatal error with the {p.upper()} neural link. Connection terminated."
+                        "type": "final_response",
+                        "value": "Sir, your OpenAI key is valid but missing the 'model.request' scope. Please check your project permissions in the OpenAI dashboard."
                     }
                     return
-                
+
                 yield {"type": "loading", "text": f"{p.upper()} FAILED -> FALLBACK..."}
                 continue
 

@@ -32,6 +32,21 @@ from backend import memory as mem
 
 logger = get_logger(__name__)
 
+# ── Version Detection ────────────────────────────────────────────────────────
+def _get_ollama_version() -> str:
+    """Attempts to get the Ollama server version."""
+    try:
+        url = f"{cfg['ollama']['base_url']}/api/version"
+        with urllib.request.urlopen(url, timeout=2) as resp:
+            return json.loads(resp.read()).get("version", "0.0.0")
+    except Exception:
+        return "0.0.0"
+
+_OLLAMA_VERSION = _get_ollama_version()
+_SUPPORTS_SCHEMA = _OLLAMA_VERSION >= "0.5.0"
+if not _SUPPORTS_SCHEMA:
+    logger.warning(f"Ollama {_OLLAMA_VERSION} < 0.5.0. Falling back to basic JSON format.")
+
 # ── Config (JSON master with env fallback) ───────────────────────────────────
 OLLAMA_BASE_URL = cfg["ollama"]["base_url"] or os.environ.get("OLLAMA_BASE_URL")
 OLLAMA_MODEL    = cfg["ollama"]["model"] or os.environ.get("OLLAMA_MODEL")
@@ -182,7 +197,7 @@ def process(transcript: str) -> dict:
         "model": OLLAMA_MODEL,
         "messages": messages,
         "stream": False,
-        "format": _JSON_SCHEMA,  # Full schema enforcement (Ollama 0.5+), not just "json"
+        "format": _JSON_SCHEMA if _SUPPORTS_SCHEMA else "json",
         "options": {
             "temperature": 0.3,
             "num_predict": 300,        # Enough for our JSON, stops over-generation

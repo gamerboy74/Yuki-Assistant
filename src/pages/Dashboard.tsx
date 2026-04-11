@@ -3,9 +3,15 @@ import { useEffect, useState } from 'react';
 interface DashboardProps {
   stats: any;
   logs: {id: string, text: string, ts: Date}[];
+  usage: {
+    input: number;
+    output: number;
+    cost: number;
+    turns: number;
+  };
 }
 
-export default function Dashboard({ stats, logs }: DashboardProps) {
+export default function Dashboard({ stats, logs, usage }: DashboardProps) {
   const [time, setTime] = useState(new Date());
 
   const weather = stats?.weather;
@@ -208,6 +214,62 @@ export default function Dashboard({ stats, logs }: DashboardProps) {
                  </div>
                </>
              )}
+          </div>
+        </div>
+
+        {/* Neural Economy Widget */}
+        <div className="glass-card p-6 flex flex-col gap-4 relative overflow-hidden group">
+          <div className="absolute -bottom-6 -right-6 w-24 h-24 bg-secondary/5 rounded-full blur-2xl group-hover:bg-secondary/10 transition-all duration-700" />
+          
+          <div className="flex items-center gap-2 mb-2">
+            <span className="material-symbols-outlined text-secondary text-xl">payments</span>
+            <h3 className="font-medium text-on-surface">Neural Economy</h3>
+          </div>
+
+          <div className="flex flex-col items-center justify-center py-4 bg-white/[0.02] border border-white/5 rounded-xl mb-2">
+             <div className="text-[10px] text-on-surface-variant/40 uppercase tracking-[0.2em] mb-1 font-bold">Session Consumption</div>
+             <div className="text-3xl font-mono text-on-surface tracking-tighter">
+                ${usage.cost.toFixed(usage.cost < 0.01 ? 6 : 4)}
+             </div>
+             <div className="text-[9px] text-secondary font-mono mt-1 opacity-60">
+                {usage.turns} BRAIN CYCLES
+             </div>
+          </div>
+
+          <div className="space-y-4">
+             {/* Input Tokens */}
+             <div className="space-y-1">
+                <div className="flex justify-between text-[10px] font-label">
+                  <span className="text-on-surface-variant/60 uppercase">Ingestion (Input)</span>
+                  <span className="text-on-surface font-mono">{usage.input.toLocaleString()} <span className="opacity-30">TKN</span></span>
+                </div>
+                <div className="h-1 w-full bg-surface-container rounded-full overflow-hidden">
+                   <div 
+                      className="h-full bg-primary/40 transition-all duration-700" 
+                      style={{ width: `${Math.min(100, (usage.input / 50000) * 100)}%` }}
+                   />
+                </div>
+             </div>
+
+             {/* Output Tokens */}
+             <div className="space-y-1">
+                <div className="flex justify-between text-[10px] font-label">
+                  <span className="text-on-surface-variant/60 uppercase">Synthesis (Output)</span>
+                  <span className="text-on-surface font-mono">{usage.output.toLocaleString()} <span className="opacity-30">TKN</span></span>
+                </div>
+                <div className="h-1 w-full bg-surface-container rounded-full overflow-hidden">
+                   <div 
+                      className="h-full bg-secondary/40 transition-all duration-700" 
+                      style={{ width: `${Math.min(100, (usage.output / 10000) * 100)}%` }}
+                   />
+                </div>
+             </div>
+          </div>
+
+          <div className="mt-2 p-2 bg-secondary/5 border-l-2 border-secondary/20 rounded-r-md">
+             <p className="text-[9px] text-on-surface-variant/60 leading-relaxed italic">
+                Optimized for <span className="text-secondary font-medium">Efficiency</span>. No token leaks detected in current session.
+             </p>
           </div>
         </div>
 

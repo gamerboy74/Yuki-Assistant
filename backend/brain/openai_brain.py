@@ -92,18 +92,37 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
             "model": active_model,
             "messages": messages,
             "stream": True,
+            "stream_options": {"include_usage": True},
             "temperature": 0.4,
         }
         if tools:
             create_kwargs["tools"] = tools
 
-        stream = await client.chat.completions.create(**create_kwargs)
+        try:
+            stream = await client.chat.completions.create(**create_kwargs)
+        except Exception as e:
+            logger.error(f"[OPENAI] API call failed: {e}")
+            if hasattr(e, "body") and e.body:
+                logger.error(f"[OPENAI] ERROR BODY: {e.body}")
+            raise e
 
         streamer = _SentenceStreamer()
         full_content = ""
         current_tool_calls: dict[int, dict] = {}
 
         async for chunk in stream:
+            # Handle Usage (OpenAI 1.26.0+ with stream_options)
+            if hasattr(chunk, "usage") and chunk.usage:
+                yield {
+                    "type": "usage",
+                    "model": active_model,
+                    "input": chunk.usage.prompt_tokens,
+                    "output": chunk.usage.completion_tokens
+                }
+
+            if not chunk.choices:
+                continue
+
             delta = chunk.choices[0].delta
 
             # Handle Text
@@ -140,7 +159,7 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
         # ── Execute Tool Calls in Parallel ─────────────────────────────────
         assistant_msg = {
             "role": "assistant",
-            "content": full_content or None,
+            "content": full_content if full_content else None,
             "tool_calls": [
                 {
                     "id": tc["id"],

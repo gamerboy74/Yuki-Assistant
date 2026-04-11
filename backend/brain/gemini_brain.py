@@ -98,6 +98,15 @@ async def _process_turn(
                     fc = part.function_call
                     tool_calls.append(fc)
                     yield {"type": "tool_start", "value": fc.name}
+            
+        # Extract usage metadata from the chunk (usually present in the final chunk of a candidate)
+        if chunk.usage_metadata:
+            yield {
+                "type": "usage",
+                "model": model_name,
+                "input": chunk.usage_metadata.prompt_token_count,
+                "output": chunk.usage_metadata.candidates_token_count
+            }
 
     if buffer.strip():
         yield {"type": "text_sentence", "value": buffer.strip()}

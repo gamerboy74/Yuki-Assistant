@@ -36,12 +36,12 @@ _ALL_TOOLS: list[dict[str, Any]] = [
     {"type": "function", "function": {"name": "type_text", "description": "Type text verbatim", "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}}},
     {"type": "function", "function": {"name": "get_user_info", "description": "Get personal facts", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "read_file", "description": "Read file contents (text, pdf, docx, pptx)", "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}},
-    {"type": "function", "function": {"name": "write_file", "description": "Write/Append text to file", "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}, "mode": {"type": "string", "enum": ["overwrite", "append"]}}, "required": ["path", "content"]}}},
+    {"type": "function", "function": {"name": "write_file", "description": "Save text/code to a file. Use a filename only (e.g., 'notes.txt'), Yuki handles the path.", "parameters": {"type": "object", "properties": {"path": {"type": "string", "description": "Filename or simple relative path"}, "content": {"type": "string"}, "mode": {"type": "string", "enum": ["overwrite", "append"]}}, "required": ["path", "content"]}}},
     {"type": "function", "function": {"name": "send_whatsapp", "description": "WhatsApp text to contact", "parameters": {"type": "object", "properties": {"contact": {"type": "string"}, "message": {"type": "string"}}, "required": ["contact", "message"]}}},
     {"type": "function", "function": {"name": "send_whatsapp_file", "description": "Send file via WhatsApp contact", "parameters": {"type": "object", "properties": {"contact": {"type": "string"}, "file_name": {"type": "string"}}, "required": ["contact", "file_name"]}}},
     {"type": "function", "function": {"name": "search_in_chrome", "description": "Search in Chrome & return info", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "smart_navigate", "description": "Navigate app UI tree", "parameters": {"type": "object", "properties": {"target": {"type": "string"}, "action": {"type": "string", "enum": ["click", "focus", "list"]}}, "required": ["target"]}}},
-    {"type": "function", "function": {"name": "design_web_page", "description": "Generate premium UI (Tailwind)", "parameters": {"type": "object", "properties": {"content": {"type": "string"}, "path": {"type": "string"}}, "required": ["content"]}}},
+    {"type": "function", "function": {"name": "design_web_page", "description": "Generate premium UI (Tailwind). Use a slug/name for 'path' (e.g. 'landing_page').", "parameters": {"type": "object", "properties": {"content": {"type": "string"}, "path": {"type": "string", "description": "Slug or filename for the design"}}, "required": ["content"]}}},
 ]
 
 # Build name → tool lookup
@@ -88,7 +88,7 @@ _KEYWORD_ROUTES: list[tuple[re.Pattern, list[str]]] = [
     (re.compile(r"news|headline|latest", re.I),
      ["latest_news"]),
 
-    (re.compile(r"design|webpage|web\s*page|html|tailwind|ui|landing\s*page", re.I),
+    (re.compile(r"design|webpage|web\s*page|html|tailwind|ui|landing\s*page|banao|likho|page", re.I),
      ["design_web_page", "write_file"]),
 
     (re.compile(r"navigate|click|button|ui\s*tree|focus", re.I),
@@ -161,7 +161,7 @@ def _build_plugin_tool() -> dict | None:
                         "plugin_name": {"type": "string", "description": "Name of the plugin to execute"},
                     },
                     "required": ["plugin_name"],
-                    "additionalProperties": True,
+                    "additionalProperties": False, # Strict for OpenAI 2.30.0
                 },
             },
         }

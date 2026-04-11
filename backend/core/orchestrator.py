@@ -15,6 +15,7 @@ from backend.brain import process_stream
 from backend.speech.synthesis_kokoro import HPVoiceSwitcher
 from backend.proactive_agent import ProactiveAgent
 from backend import executor
+from backend.utils.tokens import calculate_cost
 
 logger = get_logger(__name__)
 
@@ -71,6 +72,14 @@ class YukiOrchestrator:
                 self.loop.call_soon_threadsafe(lambda: asyncio.create_task(self._speak_alert(msg)))
         
         self.proactive = ProactiveAgent(speak_fn=sync_speak, send_fn=self._emit)
+
+        # Tokens & Cost Tracking
+        self.session_usage = {
+            "input": 0,
+            "output": 0,
+            "cost": 0.0,
+            "turns": 0
+        }
 
         # Buffers
         self.audio_buffer = bytearray()
@@ -369,6 +378,22 @@ class YukiOrchestrator:
                 if not has_native_audio:
                     self._emit("partial-response", turn_id=turn_id, text=text)
                     await self._synth_queue.put({"type": "text", "data": text})
+            elif event["type"] == "usage":
+                # Aggregate session tokens and cost
+                m_input = event.get("input", 0)
+                m_output = event.get("output", 0)
+                m_model = event.get("model", "gpt-4o-mini")
+                
+                cost = calculate_cost(m_model, m_input, m_output)
+                
+                self.session_usage["input"] += m_input
+                self.session_usage["output"] += m_output
+                self.session_usage["cost"] += cost
+                self.session_usage["turns"] += 1
+                
+                self._emit("usage_update", **self.session_usage)
+                logger.info(f"[ORCHESTRATOR] Session Usage Updated: {self.session_usage['input']} in, {self.session_usage['output']} out. Total Cost: ${self.session_usage['cost']:.6f}")
+
             elif event["type"] == "tool_start":
                 self._emit("loading", turn_id=turn_id, text=f"{event['value']}...")
             elif event["type"] == "final_response":

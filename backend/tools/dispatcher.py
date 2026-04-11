@@ -490,53 +490,72 @@ def _read_file(path: str) -> str:
 
 
 def _write_file(path: str, content: str, mode: str = "overwrite") -> str:
-    """Write or append content to a file. Auto-launches HTML designs."""
+    """Write or append content to a file. Auto-launches HTML designs. Hardened for safety."""
     import os
     import webbrowser
     import time
     from pathlib import Path
 
-    # 1. Fallback for empty path
-    if not path:
-        import winreg
-        try:
-            key_path = r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
-                reg_path, _ = winreg.QueryValueEx(key, "Desktop")
-                desktop = Path(os.path.expandvars(reg_path))
-        except Exception:
-            home = Path(os.path.expanduser("~"))
-            desktop = home / "OneDrive" / "Desktop"
-            if not desktop.exists():
-                desktop = home / "Desktop"
+    # 1. Define standard safe directories
+    user_home = Path(os.path.expanduser("~")).resolve()
+    yuki_saved = user_home / "Documents" / "Yuki_Saved"
+    yuki_designs = user_home / "Documents" / "Yuki_Saved" / "Designs"
 
-        target_dir = desktop / "Yuki_Designs"
-        target_dir.mkdir(parents=True, exist_ok=True)
-        path = target_dir / f"design_{int(time.time())}.html"
+    # 2. Path normalization
+    if not path:
+        # Fallback for empty path: auto-generate in Designs
+        yuki_designs.mkdir(parents=True, exist_ok=True)
+        path_obj = yuki_designs / f"design_{int(time.time())}.html"
     else:
-        path = Path(path).resolve()
+        # Handle root-relative (e.g., "/landing") or absolute guesses (e.g., "C:\Users\Boss")
+        p = Path(path)
+        if p.is_absolute() or str(path).startswith(("/", "\\")):
+            # If it looks like a system path but isn't in home, or is root-relative,
+            # we strip the dangerous parts and move it to Yuki_Saved.
+            filename = p.name
+            if not filename or filename in (".", ".."):
+                filename = f"file_{int(time.time())}.txt"
+            path_obj = yuki_saved / filename
+        else:
+            # Relative path: join with Yuki_Saved
+            path_obj = yuki_saved / path
+
+    path_obj = path_obj.resolve()
 
     if not content:
         return "No content to write."
 
     try:
-        user_home = Path(os.path.expanduser("~")).resolve()
-        if user_home not in path.parents and path != user_home:
-            return f"Access denied: path '{path}' is outside your home directory."
+        # 3. Final Security Check
+        # Ensure we stay within the User's profile (allow Documents, Desktop, etc.)
+        if user_home not in path_obj.parents and path_obj != user_home:
+            # Emergency fallback: force into Yuki_Saved
+            path_obj = yuki_saved / path_obj.name
+            path_obj = path_obj.resolve()
 
-        path.parent.mkdir(parents=True, exist_ok=True)
+        # 4. Create directory and write
+        path_obj.parent.mkdir(parents=True, exist_ok=True)
 
         write_mode = "a" if mode == "append" else "w"
-        with open(path, write_mode, encoding="utf-8") as f:
+        with open(path_obj, write_mode, encoding="utf-8") as f:
             f.write(content)
 
-        if path.suffix.lower() in (".html", ".htm"):
-            webbrowser.open(f"file:///{path}")
-            return f"Design complete! Saved to {path} and opened in browser."
+        # 5. UI Feedback & Auto-open
+        is_html = path_obj.suffix.lower() in (".html", ".htm") or "<html>" in content.lower()[:500]
+        
+        if is_html:
+            # If it's HTML, ensure the extension is correct and open it
+            if path_obj.suffix.lower() not in (".html", ".htm"):
+                new_path = path_obj.with_suffix(".html")
+                os.replace(path_obj, new_path)
+                path_obj = new_path
+            
+            webbrowser.open(f"file:///{path_obj}")
+            return f"Design complete! Saved to '{path_obj}' and opened in browser."
 
-        action = "Appended to" if mode == "append" else "Written"
-        return f"{action} '{path.name}' successfully."
+        action = "Appended to" if mode == "append" else "Saved"
+        return f"{action} '{path_obj.name}' successfully in '{path_obj.parent}'."
 
     except Exception as e:
-        logger.error(f"[DISPATCH] write_file failed: {e}")
-        return f"Error writing file: {str(e)[:150]}"
+        logger.error(f"[DISPATCH] _write_file failed: {e}")
+        return f"Error saving file: {str(e)[:150]}"
