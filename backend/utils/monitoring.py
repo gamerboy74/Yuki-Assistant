@@ -20,10 +20,15 @@ def get_system_stats():
         # Network (sent/recv bytes since last call)
         net = psutil.net_io_counters()
         
-        # Metadata
-        ai_model = cfg.get("gemini", {}).get("model", "Unknown")
-        if cfg.get("ollama", {}).get("enabled"):
-             ai_model = f"Ollama ({cfg['ollama']['model']})"
+        # Metadata - Respect the Dashboard selection
+        provider = cfg.get("brain", {}).get("provider", "gemini").lower()
+        
+        if provider == "openai":
+            ai_model = f"OpenAI ({cfg.get('openai', {}).get('model', 'gpt-4o-mini')})"
+        elif provider == "ollama":
+            ai_model = f"Ollama ({cfg.get('ollama', {}).get('model', 'mistral')})"
+        else:
+            ai_model = f"Gemini ({cfg.get('gemini', {}).get('model', '2.0-flash')})"
              
         return {
             "cpu": cpu_usage,

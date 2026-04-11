@@ -22,9 +22,10 @@ class VisionPlugin(Plugin):
     }
 
     def execute(self, query: str = "Describe what is on my screen.", find_coordinates_of: str = "", **_) -> str:
-        api_key = os.environ.get("GOOGLE_API_KEY")
+        from backend.config import cfg
+        api_key = cfg.get("gemini", {}).get("google_api_key") or os.environ.get("GOOGLE_API_KEY")
         if not api_key:
-            return "Vision requires the GOOGLE_API_KEY, but it is not set."
+            return "Vision requires the GOOGLE_API_KEY, but it is not set in Settings or ENV."
 
         try:
             from PIL import ImageGrab

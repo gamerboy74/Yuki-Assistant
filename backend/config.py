@@ -10,8 +10,7 @@ Usage:
 import json
 import os
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-
+# Root-level configuration path
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CONFIG_PATH = os.path.join(_ROOT, "yuki.config.json")
 
@@ -22,6 +21,7 @@ DEFAULT_CONFIG = {
         "greeting": "Hi! I'm Yuki.",
         "idle_label": 'SAY "HEY YUKI"',
         "tts_voice": "en-IN-NeerjaNeural",
+        "active_timeout_sec": 8.0
     },
     "vad": {
         "speech_threshold": 0.65
@@ -39,22 +39,29 @@ DEFAULT_CONFIG = {
     },
     "gemini": {
         "model": "gemini-2.0-flash",
-        "fallback_model": "gemini-2.0-flash-lite",
-        "use_lite_fallback": True
+        "fallback_model": "gemini-2.5-flash-lite",
+        "use_lite_fallback": True,
+        "google_api_key": ""
     },
     "openai": {
-        "model": "gpt-4o-mini"
+        "model": "gpt-4o-mini",
+        "openai_api_key": ""
     },
     "ollama": {
-        "model": "gemma3:4b", 
+        "model": "mistral:7b-instruct-q4_K_M", 
         "base_url": "http://localhost:11434"
     },
     "ai_correction": {
-        "model": "gemma3:4b"
+        "model": "mistral:7b-instruct-q4_K_M"
     },
     "tts": {
         "provider": "elevenlabs",
-        "elevenlabs_char_budget": 2000
+        "elevenlabs_char_budget": 2000,
+        "elevenlabs_api_key": "",
+        "elevenlabs_voice_id": ""
+    },
+    "brain": {
+        "provider": "auto"
     }
 }
 
@@ -89,8 +96,8 @@ def _load() -> dict:
 
 def reload():
     """Re-load the config file from disk to capture external changes (e.g. from UI)."""
-    global cfg
-    cfg = _load()
+    new_data = _load()
+    _deep_update(cfg, new_data)
     return cfg
 
 
@@ -98,9 +105,20 @@ def reload():
 cfg: dict = _load()
 
 def update_from_dict(new_cfg: dict):
-    """Update global config singleton and persist to disk."""
+    """Update global config singleton and persist to disk with root-key enforcement."""
     global cfg
-    _deep_update(cfg, new_cfg)
+    
+    # ── Strict Root Enforcement ──
+    # Prevents "pollution" where UI-specific root keys (like 'name' or 'wakeWords') 
+    # sneak into the root instead of staying inside 'assistant'.
+    ALLOWED_ROOTS = {
+        "assistant", "vad", "whisper", "router", "gemini", 
+        "openai", "ollama", "ai_correction", "tts", "brain"
+    }
+    
+    filtered_cfg = {k: v for k, v in new_cfg.items() if k in ALLOWED_ROOTS}
+    
+    _deep_update(cfg, filtered_cfg)
     try:
         with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2)

@@ -32,9 +32,9 @@ from backend import memory as mem
 
 logger = get_logger(__name__)
 
-# ── Config (env overrides JSON config) ───────────────────────────────────────
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL") or cfg["ollama"]["base_url"]
-OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL")    or cfg["ollama"]["model"]
+# ── Config (JSON master with env fallback) ───────────────────────────────────
+OLLAMA_BASE_URL = cfg["ollama"]["base_url"] or os.environ.get("OLLAMA_BASE_URL")
+OLLAMA_MODEL    = cfg["ollama"]["model"] or os.environ.get("OLLAMA_MODEL")
 _ASSISTANT_NAME = cfg["assistant"]["name"]
 
 # ── JSON Schema (Ollama 0.5+ structured output) ───────────────────────────────
@@ -67,10 +67,6 @@ You are FEMALE — always use feminine Hindi grammar (e.g. "kar sakti hoon", "bo
 If the user writes in Hindi or asks you to speak Hindi, respond in pure Hindi using DEVANAGARI SCRIPT ONLY (e.g. "हाँ, मैं हिंदी में बोल सकती हूँ।"). NEVER use romanized Hindi like "Haan main" — always use actual Unicode Devanagari characters.
 For English or Hinglish queries, respond naturally in that same style.
 
-NOTE: Simple commands (open app, volume, time, screenshot, reminder, search) are handled
-by a fast-path router before reaching you. You only receive COMPLEX or AMBIGUOUS queries
-that need reasoning, multi-step thinking, or context. Act accordingly.
-
 ═══ ACTIONS ═══
 open_app       {"name": "app"}
 close_app      {"name": "app"}
@@ -100,13 +96,12 @@ Clarify:      {"needs_clarify": true,  "action": {"type": "none", "params": {}},
 2. needs_clarify=true requires at least 2 options. NEVER hallucinate options. If the user provides a name/song, trust it and DO NOT clarify.
 3. When the user says 'send file', 'send ppt', 'send document', 'share this file' over WhatsApp → ALWAYS use send_whatsapp_file, NEVER send_whatsapp.
 4. WhatsApp: NEVER ask for a phone number. The native app searches by contact name only. If a name is given (e.g. 'Shiv Bhaiya'), use it directly — no clarification needed.
-5. System context {context} has real-time time/date/battery — use it.
+5. GREETINGS: For "hi", "hello", "hlo", or "namaste" — ALWAYS use action {"type":"none","params":{}}. DO NOT trigger tools for simple greetings.
+6. System context {context} has real-time time/date/battery — use it.
 """.replace("__ASSISTANT_NAME__", _ASSISTANT_NAME)
 )
 
-# Keep last 6 exchanges (12 messages) — enough for conversational multi-turn
-_history: list[dict] = []
-_MAX_HISTORY_EXCHANGES = 6
+from backend.brain import shared
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -168,8 +163,6 @@ def process(transcript: str) -> dict:
         needs_clarify (bool), action (dict), response (str|None),
         question (str|None), options (list)
     """
-    global _history
-
     # Build system context: real-time info + persistent memory
     context   = _build_context()
     mem_block = mem.context_block()
@@ -177,17 +170,12 @@ def process(transcript: str) -> dict:
     if mem_block:
         system_content = system_content + f"\n\n═══ WHAT I KNOW ABOUT THIS USER ═══\n{mem_block}"
 
-    # Append user message to history
-    _history.append({"role": "user", "content": transcript})
-
-    # Trim history — keep only last N exchanges (Gemma gets confused by stale command history)
-    max_msgs = _MAX_HISTORY_EXCHANGES * 2
-    if len(_history) > max_msgs:
-        _history = _history[-max_msgs:]
+    # Append user message to shared history
+    shared.add_user_message(transcript)
 
     messages = [
         {"role": "system", "content": system_content},
-        *_history,
+        *shared.get_history(),
     ]
 
     payload = json.dumps({
@@ -235,8 +223,8 @@ def process(transcript: str) -> dict:
         if not isinstance(result.get("action"), dict):
             result["action"] = {"type": "none", "params": {}}
 
-        # Store assistant reply in history
-        _history.append({"role": "assistant", "content": content})
+        # Store assistant reply in shared history
+        shared.add_assistant_message(content)
 
         return result
 
@@ -253,8 +241,7 @@ def process(transcript: str) -> dict:
 
 def clear_history():
     """Reset conversation context."""
-    global _history
-    _history = []
+    shared.clear_history()
 
 
 # ── Context injection ─────────────────────────────────────────────────────────

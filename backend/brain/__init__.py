@@ -16,43 +16,64 @@ logger = get_logger(__name__)
 # Circuit Breaker Cache: provider -> expiry_time (seconds since epoch)
 _PROVIDER_COOLDOWN: dict[str, float] = {}
 COOLDOWN_DURATION = 300  # 5 minutes
+_LAST_PROVIDER: str | None = None
 
 
 async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
     """
     Routes a user turn to the prioritized brain and handles fallbacks.
-    Implements a 429-aware circuit breaker.
+    If a specific provider is selected, fallback is disabled and voice feedback is given on error.
     """
     # Force reload of shared config to capture HUD selection
     reload()
+    
+    # 1. Determine Provider Priority (JSON Master -> ENv Fallback)
     provider_pref = cfg.get("brain", {}).get("provider", "auto").lower()
-    provider_pref = os.environ.get("AI_PROVIDER", provider_pref).lower()
+    
+    if provider_pref == "auto":
+        env_override = os.environ.get("AI_PROVIDER", "").lower()
+        if env_override:
+            provider_pref = env_override
 
-    # 1. Determine Cascade (Priority First, then Fallbacks)
     all_providers = ["gemini", "openai", "ollama"]
+    
+    # STRICT MODE: If the user explicitly chose a provider, DISABLE cascading fallbacks.
+    is_auto = (provider_pref == "auto")
     if provider_pref in all_providers:
-        # Move preferred to front, keep others as fallbacks
-        full_cascade = [provider_pref] + [p for p in all_providers if p != provider_pref]
+        full_cascade = [provider_pref]
     else:
+        # Default to cloud-first cascade for 'auto' mode
         full_cascade = all_providers
 
-    # 2. Filter by cooldown
+    # 2. Filter by cooldown & Yield UI Feedback
     now = time.time()
     active_cascade = []
     for p in full_cascade:
         expiry = _PROVIDER_COOLDOWN.get(p, 0)
         if now < expiry:
-            logger.warning(f"Skipping {p} (Neural link cooling down for {int(expiry - now)}s)")
+            if not is_auto:
+                # Manual mode failure if primary is in cooldown
+                yield {
+                    "type": "final_response",
+                    "value": f"Sir, the {p.upper()} link is currently in cooldown. Please wait or switch to Automatic mode."
+                }
+                return
             continue
         active_cascade.append(p)
 
+    if not active_cascade:
+        yield {"type": "final_response", "value": "Sir, all neural links are currently offline."}
+        return
+
     # 3. Execution Loop
     successful = False
-    for p in active_cascade:
+    for i, p in enumerate(active_cascade):
+        # Notify UI of brain connection
+        yield {"type": "loading", "text": f"SYNCING {p.upper()}..."}
+        
         try:
             if p == "gemini":
                 from backend.brain.gemini_brain import process_stream as gemini_stream
-                logger.info("Connecting to Gemini Neural Link...")
                 async for event in gemini_stream(transcript):
                     yield event
                 successful = True
@@ -60,7 +81,6 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
 
             elif p == "openai":
                 from backend.brain.openai_brain import process_stream as openai_stream
-                logger.info("Connecting to OpenAI Neural Link...")
                 async for event in openai_stream(transcript):
                     yield event
                 successful = True
@@ -71,10 +91,12 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
                 from backend.brain_ollama import is_available as ollama_ready
                 
                 if not ollama_ready():
-                    logger.warning("Local Neural Link (Ollama) is not reachable. Skipping.")
+                    if not is_auto:
+                        yield {"type": "final_response", "value": "Sir, the local Ollama instance is unreachable. Ensure the service is running."}
+                        return
+                    yield {"type": "loading", "text": "OLLAMA UNREACHABLE..."}
                     continue
                     
-                logger.info("Connecting to Local Neural Link (Ollama)...")
                 async for event in ollama_stream(transcript):
                     yield event
                 successful = True
@@ -82,18 +104,38 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
 
         except Exception as e:
             error_str = str(e).lower()
-            if "429" in error_str or "quota" in error_str or "limit" in error_str:
-                logger.error(f"Provider '{p}' exhausted (429/Quota). Marking for cooldown and falling back...")
+            is_quota = any(x in error_str for x in ["429", "quota", "limit"])
+            
+            if is_quota:
+                logger.error(f"Provider '{p}' exhausted (429/Quota).")
                 _PROVIDER_COOLDOWN[p] = time.time() + COOLDOWN_DURATION
-                # DO NOT break or return — allow the loop to move to the next provider
-                continue 
+                
+                if not is_auto:
+                    # Manual mode: VOICE MESSAGE
+                    yield {
+                        "type": "final_response",
+                        "value": f"Sir, the {p.upper()} link has reached its quota limit. I've initiated a five minute cooldown. Please switch to another brain in the dashboard."
+                    }
+                    return
+                else:
+                    # Auto mode: HUD NOTIFICATION + FALLBACK
+                    next_p = active_cascade[i+1].upper() if i+1 < len(active_cascade) else "FALLBACK"
+                    yield {"type": "loading", "text": f"{p.upper()} QUOTA HIT -> {next_p}..."}
+                    continue 
             else:
-                logger.error(f"Provider '{p}' failed: {e}. Moving to next fallback...")
+                logger.error(f"Provider '{p}' failed: {e}")
+                if not is_auto:
+                    yield {
+                        "type": "final_response", 
+                        "value": f"Sir, I've encountered a fatal error with the {p.upper()} neural link. Connection terminated."
+                    }
+                    return
+                
+                yield {"type": "loading", "text": f"{p.upper()} FAILED -> FALLBACK..."}
                 continue
 
-    if not successful:
-        logger.error("Total neural blackout. All providers failed.")
+    if not successful and is_auto:
         yield {
             "type": "final_response",
-            "value": "Sir, I've lost connection to all my neural networks. Please check your API keys or local services (Ollama).",
+            "value": "Sir, total neural blackout. All automatic fallback pathways have failed. Please check your network and API keys.",
         }

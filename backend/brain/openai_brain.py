@@ -29,9 +29,7 @@ from backend.config import cfg
 
 logger = get_logger(__name__)
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL") or cfg.get("openai", {}).get("model", "gpt-4o-mini")
-
+# Note: Model ID is pulled from cfg dynamically to allow dashboard hot-swapping
 MAX_AGENT_STEPS = 5  # Down from 8 — 5 is sufficient for complex tasks
 
 
@@ -61,16 +59,18 @@ class _SentenceStreamer:
 
 
 async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
-    """
-    Async generator that yields Brain events:
-    - {'type': 'text_sentence', 'value': '...'}
-    - {'type': 'tool_start', 'value': '...'}
-    - {'type': 'tool_end', 'value': '...'}
-    - {'type': 'final_response', 'value': '...'}
-    """
+    """Agentic tool loop for OpenAI."""
     from openai import AsyncOpenAI
+    
+    # Dynamically pull model-id and API key from config/env
+    api_key = cfg.get("openai", {}).get("openai_api_key") or os.environ.get("OPENAI_API_KEY", "")
+    active_model = cfg.get("openai", {}).get("model", "gpt-4o-mini")
+    
+    if not api_key:
+        yield {"type": "error", "text": "OpenAI API key is not configured in Settings."}
+        return
 
-    client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+    client = AsyncOpenAI(api_key=api_key)
     add_user_message(transcript)
 
     system_content = build_system_content()
@@ -89,7 +89,7 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
         messages = get_openai_messages(system_content)
 
         create_kwargs = {
-            "model": OPENAI_MODEL,
+            "model": active_model,
             "messages": messages,
             "stream": True,
             "temperature": 0.4,

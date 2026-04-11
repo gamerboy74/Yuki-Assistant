@@ -112,7 +112,7 @@ export default function App() {
   const [systemLogs, setSystemLogs] = useState<{id: string, text: string, ts: Date}[]>([]);
   
   // ── Neural Provider State ──
-  const [selectedProvider, setSelectedProvider] = useState<string>(config.brain?.provider || 'gemini');
+  const [selectedProvider, setSelectedProvider] = useState<string>(config.brain?.provider || 'auto');
 
   // Sync state with config when it loads
   useEffect(() => {
@@ -168,14 +168,16 @@ export default function App() {
         case 'idle':
           clearSpeakingWatchdog();
           if (idleTimer.current) clearTimeout(idleTimer.current);
+          // Small delay before going truly idle to prevent flickering during turn transitions
           idleTimer.current = setTimeout(() => {
             setOrbState('idle');
             setStatusLabel(config.idleLabel);
             setIsHotListening(false);
             setClarifyQuestion('');
             setClarifyOptions([]);
-            setTimeout(() => setTranscription(''), 800);
-          }, 300);
+            // Clear transcription after a moment of idle
+            setTimeout(() => setTranscription(''), 2000); 
+          }, 800);
           break;
         case 'wake':
           clearSpeakingWatchdog();
@@ -232,7 +234,8 @@ export default function App() {
           setOrbState('speaking');
           setStatusLabel('RESPONDING');
           armSpeakingWatchdog();
-          setTimeout(() => setTranscription(''), 500);
+          // Clear transcription faster when we start responding
+          setTimeout(() => setTranscription(''), 200);
           break;
         case 'partial-response':
           if (msg.text) {

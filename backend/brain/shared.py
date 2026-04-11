@@ -131,8 +131,8 @@ def get_openai_messages(system_content: str) -> list[dict]:
         return [{"role": "system", "content": system_content}, *_history]
 
 
-def get_gemini_history() -> list[dict]:
-    """Return raw history entries for Gemini content mapping."""
+def get_history() -> list[dict]:
+    """Return raw history entries for all providers to map as they see fit."""
     with _history_lock:
         return list(_history)
 

@@ -20,8 +20,11 @@ os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 logger = get_logger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
-ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "")
+def _get_elevenlabs_creds():
+    """Dynamically pull creds from config or env to avoid stale keys."""
+    key = cfg.get("tts", {}).get("elevenlabs_api_key") or os.environ.get("ELEVENLABS_API_KEY", "")
+    voice = cfg.get("tts", {}).get("elevenlabs_voice_id") or os.environ.get("ELEVENLABS_VOICE_ID", "")
+    return key, voice
 def _get_edge_voice():
     return os.environ.get("TTS_VOICE") or cfg["assistant"].get("tts_voice", "en-IN-NeerjaNeural")
 
@@ -111,7 +114,8 @@ def _speak_elevenlabs(text: str, tmp_path: str) -> bool:
     Generate speech via ElevenLabs REST API and save to tmp_path.
     Returns True on success, False on failure.
     """
-    if not ELEVENLABS_API_KEY or not ELEVENLABS_VOICE_ID:
+    api_key, voice_id = _get_elevenlabs_creds()
+    if not api_key or not voice_id:
         return False
 
     # ── Char-budget guard — avoid burning credits on long strings ──
@@ -126,7 +130,7 @@ def _speak_elevenlabs(text: str, tmp_path: str) -> bool:
     try:
         import requests  # pip install requests
 
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
         payload = {
             "text": text,
             "model_id": "eleven_multilingual_v2",
@@ -136,7 +140,7 @@ def _speak_elevenlabs(text: str, tmp_path: str) -> bool:
             },
         }
         headers = {
-            "xi-api-key": ELEVENLABS_API_KEY,
+            "xi-api-key": api_key,
             "Content-Type": "application/json",
             "Accept": "audio/mpeg",
         }
@@ -209,20 +213,56 @@ def _normalize_text(text: str) -> str:
 
 # ── Core async speak ──────────────────────────────────────────────────────────
 
-async def synthesize_to_file_async(text: str) -> str | None:
-    """Generate audio for text and save to a temporary file, returning the path."""
+async def synthesize_to_file_async(text: str, voice_id: str | None = None, provider: str | None = None) -> str | None:
+    """
+    Generate audio for text and save to a temporary file, returning the path.
+    Accepts optional voice_id and provider overrides (used for previews).
+    """
     text = _normalize_text(text)
     tmp_path = os.path.join(tempfile.gettempdir(), f"yuki_tts_{uuid.uuid4().hex}.mp3")
 
     audio_ready = False
-    provider = cfg.get("tts", {}).get("provider", "elevenlabs").lower()
+    active_provider = (provider or cfg.get("tts", {}).get("provider", "elevenlabs")).lower()
 
-    if provider == "elevenlabs" and ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID:
-        loop = asyncio.get_event_loop()
-        audio_ready = await loop.run_in_executor(None, _speak_elevenlabs, text, tmp_path)
+    if active_provider == "elevenlabs":
+        api_key, cfg_voice_id = _get_elevenlabs_creds()
+        # Use override voice_id if provided, else from config
+        target_voice_id = voice_id or cfg_voice_id
+        
+        if api_key and target_voice_id:
+            loop = asyncio.get_event_loop()
+            # We need to wrap _speak_elevenlabs to use the override voice_id
+            def _speak_el_custom():
+                import requests
+                url = f"https://api.elevenlabs.io/v1/text-to-speech/{target_voice_id}"
+                payload = {
+                    "text": text,
+                    "model_id": "eleven_multilingual_v2",
+                    "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+                }
+                headers = {"xi-api-key": api_key, "Content-Type": "application/json", "Accept": "audio/mpeg"}
+                resp = requests.post(url, json=payload, headers=headers, timeout=(5, 10))
+                resp.raise_for_status()
+                with open(tmp_path, "wb") as f:
+                    f.write(resp.content)
+                return True
+
+            try:
+                audio_ready = await loop.run_in_executor(None, _speak_el_custom)
+            except Exception as e:
+                logger.warning(f"ElevenLabs override synthesis failed: {e}")
 
     if not audio_ready:
-        audio_ready = await _speak_edge_async(text, tmp_path)
+        # Fallback (or direct) to edge-tts
+        try:
+            import edge_tts
+            target_voice = voice_id or _get_edge_voice()
+            communicate = edge_tts.Communicate(text, voice=target_voice)
+            await communicate.save(tmp_path)
+            if os.path.getsize(tmp_path) > 0:
+                audio_ready = True
+        except Exception as e:
+            logger.warning(f"Synthesis fallback failed: {e}")
 
     if audio_ready:
         return tmp_path
@@ -255,27 +295,69 @@ async def _speak_async(text: str) -> None:
 # ── Voice Listing ─────────────────────────────────────────────────────────────
 
 async def get_voices_async():
-    """Retrieve list of available Microsoft Neural voices."""
+    """Retrieve list of available Microsoft Neural and ElevenLabs voices."""
+    combined_voices = []
+    
+    # 1. Edge-TTS Voices
     try:
         import edge_tts
         voices = await edge_tts.VoicesManager.create()
-        # Filter for English voices by default, but let's send them all categorized
-        # We'll just send a curated list to avoid overwhelming the IPC
-        v_list = voices.find(Locale="en-US") + voices.find(Locale="en-GB") + voices.find(Locale="en-IN")
+        # Find global selection
+        locales = ["en-US", "en-GB", "en-IN", "hi-IN", "es-ES", "es-MX", "fr-FR", "de-DE", "ja-JP", "pt-BR", "it-IT", "ru-RU", "ko-KR", "zh-CN"]
+        v_list = []
+        for loc in locales:
+            v_list += voices.find(Locale=loc)
         
-        return [
+        # Sort by locale then name
+        v_list.sort(key=lambda x: (x["Locale"], x["FriendlyName"]))
+        
+        combined_voices.extend([
             {
                 "id": v["ShortName"],
-                "name": v["FriendlyName"].split("-")[1].strip() if "-" in v["FriendlyName"] else v["FriendlyName"],
+                "name": (v["FriendlyName"].split("-")[1] if "-" in v["FriendlyName"] else v["FriendlyName"]).strip(),
                 "gender": v["Gender"],
                 "locale": v["Locale"],
-                "provider": "edge-tts"
+                "provider": "edge-tts",
+                "isPremium": False,
+                "isMultilingual": False
             }
             for v in v_list
-        ]
+        ])
     except Exception as e:
-        logger.error(f"Failed to list voices: {e}")
-        return []
+        logger.debug(f"edge-tts voice listing failed: {e}")
+
+    # 2. ElevenLabs Voices (Auto-Discovery)
+    try:
+        api_key, _ = _get_elevenlabs_creds()
+        if api_key:
+            import requests # already used in _speak_elevenlabs
+            url = "https://api.elevenlabs.io/v1/voices" # using v1 as it is widely supported and has simple schema
+            headers = {"xi-api-key": api_key}
+            
+            # Offload blocking request to thread
+            resp = await asyncio.to_thread(requests.get, url, headers=headers, timeout=5)
+            if resp.status_code == 200:
+                el_data = resp.json()
+                el_list = el_data.get("voices", [])
+                
+                # Optimized ElevenLabs extraction
+                for v in el_list:
+                    labels = v.get("labels", {})
+                    gender = labels.get("gender", "Female").title()
+                    
+                    combined_voices.append({
+                        "id": v["voice_id"],
+                        "name": v["name"],
+                        "gender": gender,
+                        "locale": "Global", 
+                        "provider": "elevenlabs",
+                        "isPremium": True,
+                        "isMultilingual": True
+                    })
+    except Exception as e:
+        logger.debug(f"ElevenLabs voice listing failed: {e}")
+
+    return combined_voices
 
 # ── Public API ────────────────────────────────────────────────────────────────
 

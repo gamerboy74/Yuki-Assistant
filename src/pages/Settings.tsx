@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useConfig } from '../hooks/useConfig';
 
-type Tab = 'core' | 'threads' | 'neural' | 'vault' | 'config';
+type Tab = 'identity' | 'intelligence' | 'voices' | 'listener';
 
 const WHISPER_MODELS = [
   { id: 'tiny', label: 'Tiny', desc: 'Fastest, lower accuracy' },
@@ -13,7 +13,7 @@ const WHISPER_MODELS = [
 export default function Settings() {
   const config = useConfig();
 
-  const [activeTab, setActiveTab] = useState<Tab>('config');
+  const [activeTab, setActiveTab] = useState<Tab>('identity');
   const [saved, setSaved] = useState(false);
 
   // -- State variables mapped from config --
@@ -35,6 +35,7 @@ export default function Settings() {
   const [ollamaModel, setOllamaModel] = useState('gemma3:4b');
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
   const [routerOn, setRouterOn] = useState(true);
+  const [brainProvider, setBrainProvider] = useState('auto');
 
   // Config (Synthesis)
   const [ttsProvider, setTtsProvider] = useState('edge-tts');
@@ -44,6 +45,17 @@ export default function Settings() {
   const [gainDb, setGainDb] = useState(1.0);
   const [spatialAudio, setSpatialAudio] = useState(false);
   const [resamplingHq, setResamplingHq] = useState(true);
+
+  // Neural Secrets
+  const [googleApiKey, setGoogleApiKey] = useState('');
+  const [openaiApiKey, setOpenaiApiKey] = useState('');
+  const [elApiKey, setElApiKey] = useState('');
+  const [elVoiceId, setElVoiceId] = useState('');
+
+  // UI States (Show/Hide)
+  const [showGoogle, setShowGoogle] = useState(false);
+  const [showOpenai, setShowOpenai] = useState(false);
+  const [showEl, setShowEl] = useState(false);
 
   // Advanced Tuning
   const [maxRecordSecs, setMaxRecordSecs] = useState(12);
@@ -64,15 +76,26 @@ export default function Settings() {
 
   // Vault
   const [purgeConfirm, setPurgeConfirm] = useState(false);
+  const [previewing, setPreviewing] = useState<string | null>(null);
 
   // Use a ref to prevent auto-save on initial mount (which would overwrite fetched config with defaults)
   const isInitialMount = React.useRef(true);
 
-  // 1. Initialize state from directly fetched config
+  // 1. Initialize state from native Electron config source
   useEffect(() => {
-    fetch('/yuki.config.json')
-      .then(r => r.json())
-      .then(data => {
+    const loadConfig = async () => {
+      try {
+        let data;
+        if (window.yukiAPI?.getSettings) {
+          data = await window.yukiAPI.getSettings();
+        } else {
+          // Fallback for browser-only mode (testing)
+          const resp = await fetch('/yuki.config.json');
+          data = await resp.json();
+        }
+
+        if (!data) return;
+
         setAssistantName(data.assistant?.name || 'Yuki');
         setIdleLabel(data.assistant?.idle_label || 'SAY "HEY YUKI"');
         setGreeting(data.assistant?.greeting || '');
@@ -103,17 +126,38 @@ export default function Settings() {
         setLogFastPath(data.router?.log_fast_path ?? true);
         setCorrectionModel(data.ai_correction?.model ?? 'gemma3:4b');
         setUseLiteFallback(data.gemini?.use_lite_fallback ?? true);
+        setBrainProvider(data.brain?.provider || 'auto');
+
+        // Secrets (Ensures they load even if empty in default)
+        setGoogleApiKey(data.gemini?.google_api_key || '');
+        setOpenaiApiKey(data.openai?.openai_api_key || '');
+        setElApiKey(data.tts?.elevenlabs_api_key || '');
+        setElVoiceId(data.tts?.elevenlabs_voice_id || '');
 
         // Mark as hydrated - safe to save from now on
-        setTimeout(() => { isHydrated.current = true; }, 500);
-      })
-      .catch(err => console.error("Could not fetch yuki config", err));
+        setTimeout(() => { isHydrated.current = true; }, 100);
+      } catch (err) {
+        console.error("Critical: Could not load configuration", err);
+      }
+    };
+
+    loadConfig();
 
     // Listen for dynamic voices list
     if (window.yukiAPI?.onState) {
       window.yukiAPI.onState((msg: any) => {
         if (msg.type === 'voices') {
-          setAvailableVoices(msg.data);
+          // If first chunk arrives, reset list. Subsequent chunks append.
+          if (!msg.chunk || msg.chunk === 1) {
+            setAvailableVoices(msg.data);
+          } else {
+            setAvailableVoices(prev => {
+              // Deduplicate just in case 
+              const existingIds = new Set(prev.map(v => v.id));
+              const newVoices = msg.data.filter((v: any) => !existingIds.has(v.id));
+              return [...prev, ...newVoices];
+            });
+          }
         }
       });
     }
@@ -124,23 +168,39 @@ export default function Settings() {
     return () => window.yukiAPI?.removeStateListener?.();
   }, []);
 
-  // 2. Auto-save logic
+  // 2. Auto-save logic (Debounced)
   useEffect(() => {
-    if (!isHydrated.current) {
-      return;
-    }
+    if (!isHydrated.current) return;
 
     const timer = setTimeout(() => {
       handleSave();
-    }, 800);
+    }, 1500); // 1.5s debounce to prevent saving during fast typing
 
     return () => clearTimeout(timer);
   }, [
     assistantName, idleLabel, greeting, wakeWords,
-    whisperModel, silenceThold, silenceTime,
-    geminiModel, geminiFallback, openaiModel, ollamaModel, ollamaUrl, routerOn,
-    ttsProvider, ttsVoice, elBudget, speechThold, gainDb, spatialAudio, resamplingHq
+    whisperModel, silenceThold, silenceTime, maxRecordSecs,
+    geminiModel, geminiFallback, openaiModel, ollamaModel, ollamaUrl, routerOn, brainProvider,
+    ttsProvider, ttsVoice, elBudget, speechThold, gainDb, spatialAudio, resamplingHq,
+    googleApiKey, openaiApiKey, elApiKey, elVoiceId, useLiteFallback, correctionModel, fuzzyThold, logFastPath
   ]);
+  const handleVoiceSelect = (voiceId: string, provider: string) => {
+    setTtsVoice(voiceId);
+    if (provider === 'elevenlabs' || ttsProvider === 'elevenlabs') {
+      setElVoiceId(voiceId);
+    }
+  };
+
+  const handlePreviewVoice = (voiceId: string, provider: string) => {
+    setPreviewing(voiceId);
+    window.yukiAPI?.sendCommand?.({ 
+      type: 'preview_voice', 
+      voiceId, 
+      provider 
+    });
+    // Visual feedback reset
+    setTimeout(() => setPreviewing(null), 6000);
+  };
 
   const handleSave = async () => {
     try {
@@ -155,9 +215,13 @@ export default function Settings() {
         gemini: { 
           model: geminiModel,
           fallback_model: geminiFallback,
-          use_lite_fallback: useLiteFallback
+          use_lite_fallback: useLiteFallback,
+          google_api_key: googleApiKey
         },
-        openai: { model: openaiModel },
+        openai: { 
+          model: openaiModel,
+          openai_api_key: openaiApiKey
+        },
         ollama: { model: ollamaModel, base_url: ollamaUrl },
         ai_correction: { model: correctionModel },
         router: { 
@@ -175,9 +239,14 @@ export default function Settings() {
         tts: { 
           provider: ttsProvider,
           elevenlabs_char_budget: elBudget,
+          elevenlabs_api_key: elApiKey,
+          elevenlabs_voice_id: elVoiceId,
           gain_db: gainDb,
           spatial_audio: spatialAudio,
           resampling_hq: resamplingHq
+        },
+        brain: {
+          provider: brainProvider
         }
       };
 
@@ -263,9 +332,61 @@ export default function Settings() {
             className="w-full bg-surface-container-highest/50 border border-outline-variant/20 p-3 text-on-surface font-mono text-sm focus:border-tertiary outline-none transition-colors" />
         </div>
         <div className="bg-surface-container-low p-6 border border-outline-variant/10 md:col-span-2 relative">
-          <label className="font-label text-xs uppercase tracking-widest text-on-surface mb-2 block font-bold">Activation Keyphrases (COMMA SEPARATED)</label>
-          <input type="text" value={wakeWords} onChange={e => setWakeWords(e.target.value)}
-            className="w-full bg-surface-container-highest/50 border border-outline-variant/20 p-3 text-on-surface font-mono text-sm focus:border-primary outline-none transition-colors" />
+          <label className="font-label text-xs uppercase tracking-widest text-on-surface mb-4 block font-bold">Activation Keyphrases</label>
+          <div className="flex flex-wrap gap-2 mb-4 min-h-[40px] p-2 bg-surface-container-highest/20 border border-dashed border-outline-variant/20">
+            {wakeWords.split(',').map((word, idx) => {
+              const trimmed = word.trim();
+              if (!trimmed) return null;
+              return (
+                <div key={idx} className="bg-primary/10 border border-primary/30 px-3 py-1 flex items-center gap-2 group animate-in zoom-in duration-200">
+                  <span className="font-label text-xs font-bold text-primary tracking-wide uppercase">{trimmed}</span>
+                  <button 
+                    onClick={() => {
+                      const words = wakeWords.split(',').map(w => w.trim()).filter(w => w !== trimmed);
+                      setWakeWords(words.join(', '));
+                    }}
+                    className="material-symbols-outlined text-[14px] text-primary/50 hover:text-error transition-colors"
+                  >
+                    close
+                  </button>
+                </div>
+              );
+            })}
+            {wakeWords.trim() === '' && (
+              <span className="font-label text-[10px] text-on-surface-variant/40 uppercase tracking-[0.2em] self-center ml-2">No keyphrases active</span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <input 
+              type="text" 
+              placeholder="+ ADD NEW PHRASE (ENTER)..."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const val = (e.target as HTMLInputElement).value.trim().toLowerCase();
+                  if (val && !wakeWords.includes(val)) {
+                    setWakeWords(wakeWords ? `${wakeWords}, ${val}` : val);
+                    (e.target as HTMLInputElement).value = '';
+                  }
+                }
+              }}
+              className="flex-grow bg-surface-container-highest/50 border border-outline-variant/20 p-3 text-on-surface font-mono text-xs focus:border-primary outline-none transition-colors" 
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="pt-12 border-t border-outline-variant/10">
+        <div className="bg-[#1a0505] p-8 border border-error/20 flex flex-col md:flex-row justify-between items-center gap-6">
+          <div className="space-y-1">
+            <h3 className="font-headline font-bold text-error uppercase tracking-widest text-lg">Memory Vault Purge</h3>
+            <p className="font-label text-xs text-on-surface-variant">Securely wipe all persistent cognitive context and user profiling data.</p>
+          </div>
+          <button 
+            onClick={handlePurgeMemory} 
+            className={`px-10 py-4 font-label text-xs font-bold uppercase tracking-widest transition-all duration-300 ${purgeConfirm ? 'bg-error text-on-error scale-105 shadow-[0_0_20px_rgba(244,67,54,0.4)]' : 'bg-surface-container-highest text-error border border-error/30 hover:bg-error/10 hover:border-error'}`}
+          >
+            {purgeConfirm ? 'SECURE ERASE INITIALIZED' : 'WIPE MEMORY'}
+          </button>
         </div>
       </div>
     </div>
@@ -274,8 +395,8 @@ export default function Settings() {
   const renderThreads = () => (
     <div className="space-y-8 animate-in fade-in duration-500">
       <div>
-        <h2 className="font-headline text-3xl font-bold tracking-tight text-on-surface uppercase mb-2">Audio Threads</h2>
-        <p className="font-label text-sm text-on-surface-variant">Local transcription routing and threshold configurations.</p>
+        <h2 className="font-headline text-3xl font-bold tracking-tight text-on-surface uppercase mb-2">Listener Perception</h2>
+        <p className="font-label text-sm text-on-surface-variant">Configure how Yuki hears and recognizes the boundaries of human speech.</p>
       </div>
 
       <div className="bg-surface-container-low p-8 border border-outline-variant/20 relative overflow-hidden group">
@@ -358,23 +479,162 @@ export default function Settings() {
         <p className="font-label text-sm text-on-surface-variant">Configure logic engines and fallback architectures.</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div className="bg-surface-container-low p-6 border-l-2 border-primary space-y-4">
-          <label className="font-label text-xs uppercase text-primary font-bold">Gemini Primary</label>
-          <input type="text" value={geminiModel} onChange={e => setGeminiModel(e.target.value)} className="w-full bg-surface-container-highest border border-outline-variant/20 p-2 text-on-surface font-mono text-sm outline-none focus:border-primary transition-colors" />
+      <div className="bg-surface-container-low p-6 border border-outline-variant/20 relative group">
+        <label className="font-label text-xs uppercase tracking-[0.2em] text-primary mb-4 block font-bold">Primary Neural Path Mode</label>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { id: 'auto', label: 'Automatic', desc: 'Resilient Cascade' },
+            { id: 'gemini', label: 'Gemini', desc: 'Google Flash' },
+            { id: 'openai', label: 'OpenAI', desc: 'GPT-4o Mini' },
+            { id: 'ollama', label: 'Local', desc: 'Host Native' }
+          ].map(p => (
+            <div key={p.id} onClick={() => setBrainProvider(p.id)}
+              className={`p-4 border cursor-pointer transition-all ${brainProvider === p.id ? 'border-primary bg-primary/10' : 'border-outline-variant/20 bg-surface-container hover:border-primary/50'}`}>
+              <div className={`font-headline font-bold text-sm ${brainProvider === p.id ? 'text-primary' : 'text-on-surface'}`}>{p.label}</div>
+              <div className="font-label text-[9px] text-on-surface-variant mt-1 uppercase tracking-tighter">{p.desc}</div>
+            </div>
+          ))}
         </div>
-        <div className="bg-surface-container-low p-6 border-l-2 border-primary/50 space-y-4">
-          <label className="font-label text-xs uppercase text-primary/70 font-bold">Gemini Fallback (Quota 429)</label>
-          <input type="text" value={geminiFallback} onChange={e => setGeminiFallback(e.target.value)} className="w-full bg-surface-container-highest border border-outline-variant/20 p-2 text-on-surface font-mono text-sm outline-none focus:border-primary transition-colors" />
+      </div>
+
+      <div className="grid grid-cols-1 gap-8">
+        {/* Gemini Selection */}
+        <div className="relative group">
+          <div className="absolute -inset-0.5 bg-gradient-to-r from-primary/20 to-primary/5 rounded-none blur opacity-0 group-hover:opacity-100 transition duration-500" />
+          <div className="relative bg-surface-container-low border border-outline-variant/10 p-8 flex flex-col md:flex-row gap-8 items-start">
+            <div className="w-16 h-16 flex-shrink-0 bg-primary/10 flex items-center justify-center rounded-none border border-primary/20">
+              <span className="material-symbols-outlined text-primary text-3xl">psychology</span>
+            </div>
+            
+            <div className="flex-grow space-y-6 w-full">
+              <div className="flex justify-between items-center">
+                <div className="space-y-1">
+                  <h3 className="font-headline text-lg font-bold text-on-surface uppercase tracking-wide">Google Gemini Configuration</h3>
+                  <div className="flex items-center gap-2">
+                    <div className={`h-1.5 w-1.5 rounded-full ${googleApiKey ? 'bg-primary shadow-[0_0_8px_var(--md-sys-color-primary)]' : 'bg-outline-variant'}`} />
+                    <span className="font-label text-[10px] uppercase tracking-tighter text-on-surface-variant">
+                      {googleApiKey ? 'Neural Link Ready' : 'Awaiting Credential'}
+                    </span>
+                  </div>
+                </div>
+                <a href="https://aistudio.google.com/app/apikey" target="_blank" className="font-label text-[10px] text-primary hover:underline uppercase tracking-widest font-bold">API Console</a>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  {['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-lite'].map(m => (
+                    <button key={m} onClick={() => setGeminiModel(m)}
+                      className={`px-4 py-2 border font-mono text-[10px] transition-all ${geminiModel === m ? 'bg-primary border-primary text-background font-bold shadow-lg shadow-primary/20' : 'border-outline-variant/20 text-on-surface-variant hover:border-primary/50'}`}>
+                      {m.toUpperCase()}
+                    </button>
+                  ))}
+                  <div className={`px-2 py-1 flex items-center border ${!['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-lite'].includes(geminiModel) ? 'border-primary bg-primary/5' : 'border-outline-variant/20'}`}>
+                     <input type="text" placeholder="CUSTOM..." value={!['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-lite'].includes(geminiModel) ? geminiModel : ''} 
+                      onChange={e => setGeminiModel(e.target.value)}
+                      className="bg-transparent border-none outline-none font-mono text-[10px] text-on-surface placeholder:text-on-surface-variant/30 w-24" />
+                  </div>
+                </div>
+
+                <div className="relative flex items-center">
+                  <input 
+                    type={showGoogle ? "text" : "password"} 
+                    value={googleApiKey} 
+                    onChange={e => setGoogleApiKey(e.target.value)} 
+                    placeholder="Paste Google AI Studio Key..."
+                    className="w-full bg-surface-container-high/40 border border-outline-variant/10 p-4 font-mono text-xs text-on-surface focus:border-primary/50 outline-none transition-all placeholder:text-on-surface-variant/30" 
+                  />
+                  <button onClick={() => setShowGoogle(!showGoogle)} className="absolute right-4 text-on-surface-variant/50 hover:text-primary transition-colors">
+                    <span className="material-symbols-outlined text-lg">{showGoogle ? 'visibility_off' : 'visibility'}</span>
+                  </button>
+                </div>
+                
+                <div className="pt-2">
+                  <label className="font-label text-[9px] uppercase text-on-surface-variant font-bold block mb-2">Resilience Fallback</label>
+                  <input type="text" value={geminiFallback} onChange={e => setGeminiFallback(e.target.value)} className="w-full bg-surface-container-highest/30 border border-outline-variant/10 p-2 text-on-surface font-mono text-[10px] outline-none focus:border-primary" />
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="bg-surface-container-low p-6 border-l-2 border-secondary space-y-4">
-          <label className="font-label text-xs uppercase text-secondary font-bold">OpenAI Endpoint</label>
-          <input type="text" value={openaiModel} onChange={e => setOpenaiModel(e.target.value)} className="w-full bg-surface-container-highest border border-outline-variant/20 p-2 text-on-surface font-mono text-sm outline-none focus:border-secondary transition-colors" />
+
+        {/* OpenAI Card */}
+        <div className="relative group">
+          <div className="absolute -inset-0.5 bg-gradient-to-r from-secondary/20 to-secondary/5 rounded-none blur opacity-0 group-hover:opacity-100 transition duration-500" />
+          <div className="relative bg-surface-container-low border border-outline-variant/10 p-8 flex flex-col md:flex-row gap-8 items-start">
+            <div className="w-16 h-16 flex-shrink-0 bg-secondary/10 flex items-center justify-center rounded-none border border-secondary/20">
+              <span className="material-symbols-outlined text-secondary text-3xl">smart_toy</span>
+            </div>
+            
+            <div className="flex-grow space-y-6 w-full">
+              <div className="flex justify-between items-center">
+                <div className="space-y-1">
+                  <h3 className="font-headline text-lg font-bold text-on-surface uppercase tracking-wide">OpenAI Interface</h3>
+                  <div className="flex items-center gap-2">
+                    <div className={`h-1.5 w-1.5 rounded-full ${openaiApiKey ? 'bg-secondary shadow-[0_0_8px_var(--md-sys-color-secondary)]' : 'bg-outline-variant'}`} />
+                    <span className="font-label text-[10px] uppercase tracking-tighter text-on-surface-variant">
+                      {openaiApiKey ? 'Neural Link Ready' : 'Awaiting Credential'}
+                    </span>
+                  </div>
+                </div>
+                <a href="https://platform.openai.com/api-keys" target="_blank" className="font-label text-[10px] text-secondary hover:underline uppercase tracking-widest font-bold">API Console</a>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  {['gpt-4o-mini', 'gpt-4o', 'o1-mini'].map(m => (
+                    <button key={m} onClick={() => setOpenaiModel(m)}
+                      className={`px-4 py-2 border font-mono text-[10px] transition-all ${openaiModel === m ? 'bg-secondary border-secondary text-background font-bold shadow-lg shadow-secondary/20' : 'border-outline-variant/20 text-on-surface-variant hover:border-secondary/50'}`}>
+                      {m.toUpperCase()}
+                    </button>
+                  ))}
+                  <div className={`px-2 py-1 flex items-center border ${!['gpt-4o-mini', 'gpt-4o', 'o1-mini'].includes(openaiModel) ? 'border-secondary bg-secondary/5' : 'border-outline-variant/20'}`}>
+                     <input type="text" placeholder="CUSTOM..." value={!['gpt-4o-mini', 'gpt-4o', 'o1-mini'].includes(openaiModel) ? openaiModel : ''} 
+                      onChange={e => setOpenaiModel(e.target.value)}
+                      className="bg-transparent border-none outline-none font-mono text-[10px] text-on-surface placeholder:text-on-surface-variant/30 w-24" />
+                  </div>
+                </div>
+
+                <div className="relative flex items-center">
+                  <input 
+                    type={showOpenai ? "text" : "password"} 
+                    value={openaiApiKey} 
+                    onChange={e => setOpenaiApiKey(e.target.value)} 
+                    placeholder="sk-..."
+                    className="w-full bg-surface-container-high/40 border border-outline-variant/10 p-4 font-mono text-xs text-on-surface focus:border-secondary/50 outline-none transition-all placeholder:text-on-surface-variant/30" 
+                  />
+                  <button onClick={() => setShowOpenai(!showOpenai)} className="absolute right-4 text-on-surface-variant/50 hover:text-secondary transition-colors">
+                    <span className="material-symbols-outlined text-lg">{showOpenai ? 'visibility_off' : 'visibility'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="bg-surface-container-low p-6 border-l-2 border-tertiary space-y-4 md:col-span-2 grid grid-cols-2 gap-4">
-          <div className="col-span-2"><label className="font-label text-xs uppercase text-tertiary font-bold">Ollama Native</label></div>
-          <input type="text" value={ollamaModel} onChange={e => setOllamaModel(e.target.value)} className="w-full bg-surface-container-highest border border-outline-variant/20 p-2 text-on-surface font-mono text-sm outline-none focus:border-tertiary transition-colors" placeholder="Model (gemma3:4b)" />
-          <input type="text" value={ollamaUrl} onChange={e => setOllamaUrl(e.target.value)} className="w-full bg-surface-container-highest border border-outline-variant/20 p-2 text-on-surface font-mono text-sm outline-none focus:border-tertiary transition-colors" placeholder="Base URL" />
+
+        {/* Ollama Selection */}
+        <div className="bg-surface-container-low p-6 border-l-4 border-tertiary space-y-6">
+          <div>
+            <label className="font-label text-xs uppercase text-tertiary font-bold tracking-widest">Ollama Local Native</label>
+            <p className="font-label text-[10px] text-on-surface-variant mt-1">Host-resident intelligence (Offline capable).</p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+             <div className="space-y-2">
+               <label className="font-label text-[9px] uppercase text-on-surface-variant">Recommended Models</label>
+               <div className="flex flex-wrap gap-2">
+                 {['phi4', 'gemma3:4b', 'mistral', 'llama3.2'].map(m => (
+                   <button key={m} onClick={() => setOllamaModel(m)}
+                     className={`px-3 py-1.5 border font-mono text-[9px] transition-all ${ollamaModel === m ? 'bg-tertiary border-tertiary text-background font-bold' : 'border-outline-variant/10 text-on-surface-variant hover:border-tertiary/50'}`}>
+                     {m.toUpperCase()}
+                   </button>
+                 ))}
+               </div>
+               <input type="text" value={ollamaModel} onChange={e => setOllamaModel(e.target.value)} className="w-full bg-surface-container-highest/30 border border-outline-variant/10 p-3 text-on-surface font-mono text-xs outline-none focus:border-tertiary transition-colors mt-2" placeholder="OR CUSTOM MODEL NAME..." />
+             </div>
+             <div className="space-y-2">
+               <label className="font-label text-[9px] uppercase text-on-surface-variant">Connection Protocol</label>
+               <input type="text" value={ollamaUrl} onChange={e => setOllamaUrl(e.target.value)} className="w-full bg-surface-container-highest/30 border border-outline-variant/10 p-3 text-on-surface font-mono text-xs outline-none focus:border-tertiary transition-colors" placeholder="URL (e.g. http://localhost:11434)" />
+             </div>
+          </div>
         </div>
       </div>
 
@@ -407,8 +667,14 @@ export default function Settings() {
             { label: 'SYNTHESIS', icon: 'record_voice_over', color: 'secondary' }
           ].map((node, i) => (
             <div key={node.label} className="relative z-10 flex flex-col items-center group">
-              <div className={`w-14 h-14 rounded-full bg-surface-container border border-outline-variant/40 flex items-center justify-center transition-all duration-500 group-hover:border-${node.color} group-hover:shadow-[0_0_20px_rgba(var(--${node.color}-rgb),0.2)]`}>
-                <span className={`material-symbols-outlined text-${node.color} text-[24px]`}>{node.icon}</span>
+              <div 
+                className={`w-14 h-14 rounded-full bg-surface-container border border-outline-variant/40 flex items-center justify-center transition-all duration-500`}
+                style={{ 
+                  borderColor: i > 0 ? `var(--md-sys-color-${node.color})` : undefined,
+                  boxShadow: `0 0 20px rgba(var(--${node.color}-rgb), 0.1)`
+                }}
+              >
+                <span className={`material-symbols-outlined text-[24px]`} style={{ color: `var(--md-sys-color-${node.color})` }}>{node.icon}</span>
               </div>
               <div className="absolute -bottom-8 font-label text-[9px] uppercase tracking-widest text-on-surface-variant font-bold whitespace-nowrap">{node.label}</div>
               {i < 3 && (
@@ -456,33 +722,7 @@ export default function Settings() {
     </div>
   );
 
-  const renderVault = () => (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <div>
-        <h2 className="font-headline text-3xl font-bold tracking-tight text-on-surface uppercase mb-2">Vault Security</h2>
-        <p className="font-label text-sm text-on-surface-variant">Manage persistent memory vectors and privacy states.</p>
-      </div>
 
-      <div className="bg-surface-container-low p-6 border border-outline-variant/20 space-y-6">
-        <div className="flex justify-between items-center pb-4 border-b border-outline-variant/10">
-          <span className="font-label text-xs uppercase tracking-widest text-on-surface-variant">Local AI Processing</span>
-          <span className="font-mono text-xs text-primary">ENABLED</span>
-        </div>
-        <div className="flex justify-between items-center pb-4 border-b border-outline-variant/10">
-          <span className="font-label text-xs uppercase tracking-widest text-on-surface-variant">Cloud Voice History</span>
-          <span className="font-mono text-xs text-on-surface-variant">OFFLINE</span>
-        </div>
-      </div>
-
-      <div className="bg-[#1a0505] p-6 border border-error/20">
-        <h3 className="font-headline font-bold text-error uppercase mb-2">Danger Zone</h3>
-        <p className="font-label text-xs text-on-surface-variant mb-6">Irreversibly delete all accumulated conversational memory and context.</p>
-        <button onClick={handlePurgeMemory} className={`px-6 py-3 font-label text-xs font-bold uppercase tracking-widest transition-colors ${purgeConfirm ? 'bg-error text-on-error' : 'bg-surface-container-highest text-error border border-error/50 hover:bg-error/10'}`}>
-          {purgeConfirm ? 'CONFIRM DESTRUCTION' : 'PURGE MEMORY VAULT'}
-        </button>
-      </div>
-    </div>
-  );
 
   const renderConfig = () => (
     <div className="space-y-12 animate-in fade-in duration-500">
@@ -561,12 +801,16 @@ export default function Settings() {
               { id: 'en-US-GuyNeural', name: 'NOVA-CORE', desc: 'AUTHORITATIVE / MALE', color: 'secondary', img: 'https://images.unsplash.com/photo-1614741118887-7a4ee193a5fa?q=80&w=600&auto=format&fit=crop' },
               { id: 'en-GB-SoniaNeural', name: 'PULSE-B', desc: 'TECHNICAL / FEMALE', color: 'tertiary', img: 'https://images.unsplash.com/photo-1558591710-4b4a1ae0f04d?q=80&w=600&auto=format&fit=crop' }
             ].map(identity => {
-              const isSelected = ttsVoice === identity.id;
+              // Smart check: matching is selected if either ttsVoice matches OR 
+              // (if elevenlabs is active) elVoiceId matches this identity
+              const isSelected = ttsProvider === 'elevenlabs' 
+                ? elVoiceId === identity.id 
+                : ttsVoice === identity.id;
               const borderColors: Record<string, string> = { "primary": "border-primary", "secondary": "border-secondary", "tertiary": "border-tertiary" };
               const textColors: Record<string, string> = { "primary": "text-primary", "secondary": "text-secondary", "tertiary": "text-tertiary" };
 
               return (
-                <div key={identity.id} onClick={() => setTtsVoice(identity.id)}
+                <div key={identity.id} onClick={() => handleVoiceSelect(identity.id, 'edge-tts')}
                   className={`group relative bg-surface-container-low border transition-all duration-300 cursor-pointer overflow-hidden ${isSelected ? `${borderColors[identity.color]} shadow-lg shadow-${identity.color}/10` : 'border-outline-variant/30 hover:border-surface-variant'}`}>
                   <div className="aspect-[16/10] relative overflow-hidden bg-surface-container-highest">
                     <img src={identity.img} className={`w-full h-full object-cover transition-all duration-700 ${isSelected ? 'opacity-60 scale-105' : 'opacity-30 group-hover:opacity-40 group-hover:scale-105'}`} />
@@ -575,11 +819,20 @@ export default function Settings() {
                       <div className={`font-headline font-bold text-xl leading-none ${textColors[identity.color]}`}>{identity.name}</div>
                       <div className="font-label text-[10px] text-on-surface-variant mt-1 tracking-widest uppercase">{identity.desc}</div>
                     </div>
-                    {isSelected && (
-                      <div className={`absolute top-4 right-4 animate-in fade-in zoom-in duration-300`}>
-                        <span className={`material-symbols-outlined ${textColors[identity.color]} fill-1`}>verified</span>
-                      </div>
-                    )}
+                    
+                    <div className="absolute top-4 right-4 flex items-center gap-2">
+                       <button 
+                        onClick={(e) => { e.stopPropagation(); handlePreviewVoice(identity.id, 'edge-tts'); }}
+                        className={`w-8 h-8 rounded-full flex items-center justify-center backdrop-blur-md border transition-all ${previewing === identity.id ? 'bg-primary border-primary animate-pulse text-background' : 'bg-surface-container/60 border-outline-variant/30 text-on-surface hover:bg-primary/20 hover:border-primary'}`}
+                      >
+                        <span className="material-symbols-outlined text-sm">{previewing === identity.id ? 'graphic_eq' : 'play_arrow'}</span>
+                      </button>
+                      {isSelected && (
+                        <div className={`animate-in fade-in zoom-in duration-300`}>
+                          <span className={`material-symbols-outlined ${textColors[identity.color]} fill-1`}>verified</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div className="p-3">
                     <div className={`text-center py-1 font-label text-[9px] tracking-[0.2em] font-bold border transition-colors ${isSelected ? `bg-${identity.color}/10 ${borderColors[identity.color]} ${textColors[identity.color]}` : 'bg-surface-bright border-outline-variant/30 text-on-surface-variant'}`}>
@@ -642,26 +895,50 @@ export default function Settings() {
                 return matchesSearch && matchesGender;
               })
               .map(voice => {
-                const isSelected = ttsVoice === voice.id;
+                const isSelected = ttsProvider === 'elevenlabs'
+                  ? elVoiceId === voice.id
+                  : ttsVoice === voice.id;
+
                 return (
-                  <div key={voice.id} onClick={() => setTtsVoice(voice.id)}
+                  <div key={voice.id} onClick={() => handleVoiceSelect(voice.id, voice.provider)}
                     className={`min-width-[240px] flex-shrink-0 snap-start p-5 border transition-all duration-300 cursor-pointer flex flex-col justify-between h-[160px] relative overflow-hidden ${isSelected ? 'border-primary bg-primary/10' : 'border-outline-variant/20 bg-surface-container-low hover:border-primary/40'}`}>
                     
                     {/* Visual Decor */}
                     <div className="absolute -right-4 -top-4 w-12 h-12 border border-outline-variant/10 rotate-45 pointer-events-none"></div>
                     
                     <div className="relative z-10">
-                      <div className="flex justify-between items-start mb-2">
-                        <div className={`font-headline font-bold text-sm tracking-tighter truncate ${isSelected ? 'text-primary' : 'text-on-surface'}`}>{voice.name}</div>
-                        {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse"></div>}
+                      {/* Actions Area */}
+                      <div className="flex items-center justify-between relative z-10">
+                        <div className={`font-headline font-bold text-xs uppercase tracking-wider ${isSelected ? 'text-primary' : 'text-on-surface'}`}>{voice.name}</div>
+                        <div className="flex items-center gap-2">
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); handlePreviewVoice(voice.id, voice.provider); }}
+                            className={`w-8 h-8 rounded-full flex items-center justify-center border transition-all ${previewing === voice.id ? 'bg-primary border-primary animate-pulse text-background' : 'bg-surface-container-highest/50 border-outline-variant/20 text-on-surface-variant hover:text-primary hover:border-primary/50'}`}
+                          >
+                            <span className="material-symbols-outlined text-[16px]">{previewing === voice.id ? 'graphic_eq' : 'play_arrow'}</span>
+                          </button>
+                          {isSelected && <span className="material-symbols-outlined text-primary text-sm fill-1">verified</span>}
+                        </div>
                       </div>
                       <div className="font-label text-[8px] text-on-surface-variant uppercase tracking-[0.2em]">{voice.locale.split('-')[1]} // {voice.gender}</div>
                     </div>
 
                     <div className="relative z-10 mt-auto pt-4 border-t border-outline-variant/10">
                       <div className={`font-mono text-[8px] truncate ${isSelected ? 'text-primary/70' : 'text-on-surface-variant/40'}`}>{voice.id}</div>
-                      <div className={`mt-2 py-1 text-center font-label text-[7px] uppercase tracking-widest border ${isSelected ? 'bg-primary/20 border-primary text-primary' : 'bg-surface-bright border-outline-variant/30 text-on-surface-variant'}`}>
-                        {isSelected ? 'ACTIVE_NEURAL' : 'STANDBY'}
+                      <div className={`mt-2 flex gap-1`}>
+                        <div className={`flex-1 py-1 text-center font-label text-[7px] uppercase tracking-widest border ${isSelected ? 'bg-primary/20 border-primary text-primary' : 'bg-surface-bright border-outline-variant/30 text-on-surface-variant'}`}>
+                          {isSelected ? 'ACTIVE_NEURAL' : 'STANDBY'}
+                        </div>
+                        {voice.isPremium && (
+                          <div className="bg-tertiary/10 border border-tertiary/30 text-tertiary px-2 py-1 font-label text-[6px] uppercase tracking-tighter flex items-center shrink-0">
+                            PREMIUM
+                          </div>
+                        )}
+                        {voice.isMultilingual && (
+                          <div className="bg-secondary/10 border border-secondary/30 text-secondary px-2 py-1 font-label text-[6px] uppercase tracking-tighter flex items-center shrink-0">
+                            MULTILINGUAL
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -685,15 +962,63 @@ export default function Settings() {
 
       {/* Section C: Technical Sliders */}
       <section className="bg-surface-container-low p-8 border border-outline-variant/20 relative overflow-hidden">
-        <div className="absolute top-0 right-0 p-4 font-label text-[8px] text-primary/30 rotate-90 origin-top-right select-none">PRECISION_UNIT_V2.0.4</div>
-        <div className="mb-10">
-          <h2 className="font-headline text-2xl font-bold text-on-surface uppercase tracking-tight">Signal Modulation</h2>
+        <div className="absolute top-0 right-0 p-4 font-label text-[8px] text-tertiary/30 rotate-90 origin-top-right select-none">VOCAL_CORE_V2.0</div>
+        <div className="mb-10 flex justify-between items-start">
+          <div>
+            <h2 className="font-headline text-3xl font-bold text-on-surface uppercase tracking-tight">Vocal Synthesis Engine</h2>
+            <p className="font-label text-xs text-on-surface-variant mt-2">Manage neural voice identities and bio-synthesis parameters.</p>
+          </div>
         </div>
+
+        {/* ElevenLabs Secret Card */}
+        <div className="mb-12 relative group">
+          <div className="absolute -inset-0.5 bg-gradient-to-r from-tertiary/20 to-tertiary/5 rounded-none blur opacity-0 group-hover:opacity-100 transition duration-500" />
+          <div className="relative bg-surface-container border border-outline-variant/10 p-8 flex flex-col md:flex-row gap-8 items-start">
+            <div className="w-16 h-16 flex-shrink-0 bg-tertiary/10 flex items-center justify-center rounded-none border border-tertiary/20">
+              <span className="material-symbols-outlined text-tertiary text-3xl">waves</span>
+            </div>
+            
+            <div className="flex-grow space-y-6 w-full">
+              <div className="flex justify-between items-center">
+                <div className="space-y-1">
+                  <h3 className="font-headline text-lg font-bold text-on-surface uppercase tracking-wide">ElevenLabs Premium Config</h3>
+                  <div className="flex items-center gap-2">
+                    <div className={`h-1.5 w-1.5 rounded-full ${elApiKey ? 'bg-tertiary shadow-[0_0_8px_var(--md-sys-color-tertiary)]' : 'bg-outline-variant'}`} />
+                    <span className="font-label text-[10px] uppercase tracking-tighter text-on-surface-variant">
+                      {elApiKey ? 'Synthesis Link Ready' : 'Awaiting Credential'}
+                    </span>
+                  </div>
+                </div>
+                <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" className="font-label text-[10px] text-tertiary hover:underline uppercase tracking-widest font-bold">API Console</a>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="relative flex items-center">
+                  <input 
+                    type={showEl ? "text" : "password"} 
+                    value={elApiKey} 
+                    onChange={e => setElApiKey(e.target.value)} 
+                    placeholder="API Key..."
+                    className="w-full bg-surface-container-high/40 border border-outline-variant/10 p-4 font-mono text-xs text-on-surface focus:border-tertiary/50 outline-none transition-all placeholder:text-on-surface-variant/30" 
+                  />
+                  <button onClick={() => setShowEl(!showEl)} className="absolute right-4 text-on-surface-variant/50 hover:text-tertiary transition-colors">
+                    <span className="material-symbols-outlined text-lg">{showEl ? 'visibility_off' : 'visibility'}</span>
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  <input type="text" value={elVoiceId} onChange={e => setElVoiceId(e.target.value)} placeholder="Active Voice Signature (Manual ID)..." className="w-full bg-surface-container-high/40 border border-outline-variant/10 p-4 font-mono text-xs text-on-surface focus:border-tertiary/50 outline-none transition-all placeholder:text-on-surface-variant/30" />
+                  <div className="px-2 font-label text-[8px] text-tertiary/60 uppercase tracking-widest">Master Signature for Synthesis</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
           <div className="space-y-8">
             <div className="space-y-4">
               <div className="flex justify-between font-label text-xs uppercase tracking-widest">
-                <span className="text-primary font-bold">VAD Threshold</span>
+                <span className="text-primary font-bold">Resampling Quality</span>
                 <span className="text-on-surface">{speechThold.toFixed(2)}</span>
               </div>
               <div className="relative flex items-center">
@@ -761,11 +1086,10 @@ export default function Settings() {
       <div className="px-8 pt-8 pb-4 shrink-0 border-b border-outline-variant/10">
         <div className="flex space-x-6 overflow-x-auto hide-scrollbar">
           {[
-            { id: 'core', label: 'Core / Identity' },
-            { id: 'threads', label: 'Audio Threads' },
-            { id: 'neural', label: 'Neural Fallbacks' },
-            { id: 'vault', label: 'Security Vault' },
-            { id: 'config', label: 'Modulation' }
+            { id: 'identity', label: 'Identity' },
+            { id: 'intelligence', label: 'Intelligence' },
+            { id: 'voices', label: 'Voices' },
+            { id: 'listener', label: 'Listener' }
           ].map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id as Tab)}
               className={`pb-4 border-b-2 font-label text-xs font-bold tracking-widest uppercase transition-colors whitespace-nowrap ${activeTab === tab.id ? 'border-primary text-primary' : 'border-transparent text-secondary opacity-60 hover:opacity-100 hover:text-on-surface'}`}>
@@ -778,11 +1102,10 @@ export default function Settings() {
       {/* Main Settings Content Area */}
       <div className="flex-1 overflow-y-auto p-8 relative hide-scrollbar">
         <div className="max-w-5xl mx-auto pb-20">
-          {activeTab === 'config' && renderConfig()}
-          {activeTab === 'core' && renderCore()}
-          {activeTab === 'threads' && renderThreads()}
-          {activeTab === 'neural' && renderNeural()}
-          {activeTab === 'vault' && renderVault()}
+          {activeTab === 'identity' && renderCore()}
+          {activeTab === 'intelligence' && renderNeural()}
+          {activeTab === 'voices' && renderConfig()}
+          {activeTab === 'listener' && renderThreads()}
         </div>
       </div>
 

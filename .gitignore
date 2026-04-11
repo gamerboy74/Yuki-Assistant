@@ -26,6 +26,7 @@ backend/models/
 .env
 .env.local
 .env.*.local
+yuki.config.json
 
 # ── IDE ───────────────────────────────────────────
 .vscode/

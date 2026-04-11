@@ -19,13 +19,13 @@ from backend.brain.shared import (
     is_conversational,
     add_user_message,
     add_assistant_message,
-    get_gemini_history,
+    get_history,
 )
 from backend.brain.tools import get_tools_for_query
 
 logger = get_logger(__name__)
 
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
+# API key is pulled from cfg inside the processing loop to allow UI-based updates.
 _DEFAULT_MODEL = "gemini-2.0-flash"
 MAX_AGENT_STEPS = 5
 
@@ -141,7 +141,6 @@ async def _process_turn(
 
 async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
     """High-level Gemini stream with selective tools and chat fast path."""
-    client = genai.Client(api_key=GOOGLE_API_KEY)
 
     add_user_message(transcript)
     system_content = build_system_content()
@@ -156,15 +155,22 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
 
     # Map shared history to Gemini Content objects
     current_contents = []
-    for entry in get_gemini_history():
+    for entry in get_history():
         role = "user" if entry["role"] == "user" else "model"
         current_contents.append(
             types.Content(role=role, parts=[types.Part(text=entry["content"])])
         )
 
-    # Model settings from config
+    # ── Configuration Entry Point ─────────────────────────────────────
+    api_key = cfg.get("gemini", {}).get("google_api_key") or os.environ.get("GOOGLE_API_KEY", "")
     primary_model = cfg.get("gemini", {}).get("model", _DEFAULT_MODEL)
     fallback_model = cfg.get("gemini", {}).get("fallback_model", "gemini-2.0-flash-lite")
+    
+    if not api_key:
+        yield {"type": "error", "text": "Gemini API key is not configured in Settings."}
+        return
+
+    client = genai.Client(api_key=api_key)
     use_lite = cfg.get("gemini", {}).get("use_lite_fallback", True)
 
     session_text = ""

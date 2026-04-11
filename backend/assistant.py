@@ -73,8 +73,23 @@ async def main():
     async def _handle_get_voices_async():
         from backend.speech.synthesis import get_voices_async
         v_list = await get_voices_async()
-        send({"type": "voices", "data": v_list})
-        logger.info("Sent dynamic voice list to UI.")
+        
+        # Chunk into groups of 50 to prevent pipe flooding
+        chunk_size = 50
+        total_chunks = (len(v_list) + chunk_size - 1) // chunk_size
+        
+        for i in range(0, len(v_list), chunk_size):
+            chunk = v_list[i : i + chunk_size]
+            send({
+                "type": "voices", 
+                "data": chunk, 
+                "chunk": (i // chunk_size) + 1,
+                "total": total_chunks
+            })
+            # Small breath between bursts to keep event loop responsive
+            await asyncio.sleep(0.1)
+            
+        logger.info(f"Dispatched {len(v_list)} neural identities to UI in {total_chunks} batches.")
 
     def _handle_get_voices():
         asyncio.create_task(_handle_get_voices_async())
@@ -103,16 +118,33 @@ async def main():
                 elif data.get("type") == "save_settings":
                     from backend.config import update_from_dict
                     new_val = data.get("value", {})
+                    
+                    # Check if provider specifically changed to announce it
+                    old_provider = cfg.get("brain", {}).get("provider")
                     update_from_dict(new_val)
+                    new_provider = cfg.get("brain", {}).get("provider")
+                    
                     loop.call_soon_threadsafe(orchestrator.reload_config)
                     logger.info("Configuration reloaded from UI.")
+                    
+                    if old_provider != new_provider:
+                        # Quick vocal confirmation of neural link swap
+                        msg = f"Neural link established with {new_provider.title()}."
+                        orchestrator.speak(msg)
                 elif data.get("type") == "get_voices":
                     loop.call_soon_threadsafe(_handle_get_voices)
+                elif data.get("type") == "preview_voice":
+                    v_id = data.get("voiceId")
+                    v_prov = data.get("provider", "edge-tts")
+                    text = data.get("text", "Neural Link Established. This is a preview of my current vocal configuration.")
+                    asyncio.run_coroutine_threadsafe(orchestrator.handle_preview_voice(text, v_id, v_prov), loop)
                 elif data.get("type") == "purge_memory":
                     from backend import memory as mem
                     mem.clear_session_context()
                     logger.info("Memory vault purged.")
-            except: pass
+            except Exception as e:
+                import traceback
+                logger.error(f"Error in bridge stdin loop: {e}\n{traceback.format_exc()}")
 
     loop = asyncio.get_running_loop()
     threading.Thread(target=stdin_reader, daemon=True).start()

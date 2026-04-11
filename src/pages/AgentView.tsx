@@ -19,6 +19,7 @@ interface AgentViewProps {
 }
 
 const PROVIDER_CONFIG: Record<string, { label: string, color: string, icon: string }> = {
+  auto: { label: 'Automatic', color: '#fbbf24', icon: 'auto_awesome' },
   gemini: { label: 'Gemini Link', color: '#8ff5ff', icon: 'flare' },
   openai: { label: 'OpenAI Link', color: '#10a37f', icon: 'psychology' },
   ollama: { label: 'Local Link', color: '#d946ef', icon: 'hub' },

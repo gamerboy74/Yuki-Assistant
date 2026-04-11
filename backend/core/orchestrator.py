@@ -6,12 +6,14 @@ import time
 import audioop
 from typing import AsyncGenerator, Callable
 from backend.utils.logger import get_logger
+from backend.config import cfg
 from backend.speech.sentinel import VoiceSentinel, VADStreamProcessor
 from backend.speech.recognition import AsyncWhisperStreamer
 from backend.speech.wake_word import WakeWordDetector
 from backend.brain import process_stream
 from backend.speech.synthesis_kokoro import HPVoiceSwitcher
 from backend.proactive_agent import ProactiveAgent
+from backend import executor
 
 logger = get_logger(__name__)
 
@@ -47,7 +49,10 @@ class YukiOrchestrator:
         self._brain_audio_buffer = bytearray()
         self._event_seq = 0
         self._turn_counter = 0
-        self.active_mode_timeout_sec = float(os.environ.get("YUKI_ACTIVE_MODE_TIMEOUT_SEC", "8"))
+        self.active_mode_timeout_sec = float(
+            cfg.get("assistant", {}).get("active_timeout_sec") or 
+            os.environ.get("YUKI_ACTIVE_MODE_TIMEOUT_SEC", "8")
+        )
         self._active_since = 0.0
         self.loop = None
         
@@ -188,7 +193,7 @@ class YukiOrchestrator:
             # 1. Direct Barge-In Check (VAD Confidence based)
             if self.is_speaking:
                 confidence = self.sentinel.get_speech_confidence(chunk)
-                if confidence > 0.8: 
+                if confidence > 0.7: 
                     logger.info("[ORCHESTRATOR] Speech detected during playback. Interrupting...")
                     self._log("Barge-in detected: Interrupting playback.")
                     self.stop_playback_event.set()
@@ -229,9 +234,7 @@ class YukiOrchestrator:
                 logger.error(f"Turn processing failed: {e}")
                 self._emit("response", turn_id=turn_id, text="I hit a runtime issue, but I am still online.")
             finally:
-                self.mode = "idle"
-                self._emit("turn_completed", turn_id=turn_id)
-                self._emit("idle", turn_id=turn_id)
+                pass # Sync Alignment: reset events are now in _await_turn_cleanup
 
     async def _process_inline_turn(self, transcript: str, turn_id: str):
         """Run wake+inline command inside serialized turn lock."""
@@ -242,9 +245,7 @@ class YukiOrchestrator:
                 logger.error(f"Inline turn failed: {e}")
                 self._emit("response", turn_id=turn_id, text="I hit a runtime issue, but I am still online.")
             finally:
-                self.mode = "idle"
-                self._emit("turn_completed", turn_id=turn_id)
-                self._emit("idle", turn_id=turn_id)
+                pass # Sync alignment
 
     async def handle_text_input(self, text: str):
         """Process a typed text message from the UI as a normal turn."""
@@ -263,9 +264,38 @@ class YukiOrchestrator:
                 logger.error(f"Text turn failed: {e}")
                 self._emit("response", turn_id=turn_id, text="I hit a runtime issue, but I am still online.")
             finally:
-                self.mode = "idle"
-                self._emit("turn_completed", turn_id=turn_id)
-                self._emit("idle", turn_id=turn_id)
+                pass # Sync alignment
+
+    async def handle_preview_voice(self, text: str, voice_id: str, provider: str):
+        """Play a voice audition through the orchestrator's managed mixer."""
+        logger.info(f"[ORCHESTRATOR] Preview requested: {voice_id} ({provider})")
+        
+        # 1. Stop any ongoing speech
+        self.stop_playback_event.set()
+        
+        # Allow a tiny moment for workers to clear
+        await asyncio.sleep(0.1)
+        self.stop_playback_event.clear()
+        
+        self.is_speaking = True
+        self._emit("speaking")
+        
+        try:
+            from backend.speech import synthesis as cloud_tts
+            # Generate the sample
+            path = await cloud_tts.synthesize_to_file_async(text, voice_id=voice_id, provider=provider)
+            if path:
+                # Play it using the orchestrator's interruptible playback
+                await self._play_file_with_interrupt(path)
+                try: os.unlink(path)
+                except: pass
+            else:
+                logger.error("Preview synthesis failed (no audio generated).")
+        except Exception as e:
+            logger.error(f"Preview handling failed: {e}")
+        finally:
+            self.is_speaking = False
+            self._emit("idle")
 
     async def handle_manual_trigger(self):
         """Enter active listening mode from the UI trigger button."""
@@ -316,12 +346,40 @@ class YukiOrchestrator:
                 self._emit("loading", turn_id=turn_id, text=f"{event['value']}...")
             elif event["type"] == "final_response":
                 final_text = event["value"]
+                action = event.get("action")
+                
+                if action and action.get("type") != "none":
+                    # Run actual OS command
+                    logger.info(f"Neural Trigger: {action['type']} | params: {action.get('params')}")
+                    exec_result = await asyncio.to_thread(executor.execute, action)
+                    
+                    # Error Correction Loop:
+                    # If executor returns an explicit message (like "I couldn't find that app"),
+                    # we use that instead of the brain's optimistic prediction.
+                    if exec_result and isinstance(exec_result, str):
+                        final_text = exec_result
+                
                 self._emit("response", turn_id=turn_id, text=final_text)
         
         # Signal end of stream to synth worker
         await self._synth_queue.put(None)
-        await self._synth_task
-        await self._playback_task
+        
+        # We NO LONGER await playback here. Releasing the lock allows 
+        # the next turn to start thinking while this one is still talking.
+        self.loop.create_task(self._await_turn_cleanup(self._synth_task, self._playback_task, turn_id))
+
+    async def _await_turn_cleanup(self, synth_task, playback_task, turn_id: str):
+        """Background cleanup for a completed turn's audio tasks."""
+        await synth_task
+        await playback_task
+        
+        # Emitting these here ensures visually that Yuki stays 'speaking' 
+        # until the audio ends, even though the Thinking Lock was released early.
+        self.mode = "idle"
+        self._emit("turn_completed", turn_id=turn_id)
+        self._emit("idle", turn_id=turn_id)
+        
+        logger.debug(f"Turn {turn_id} cleanup complete.")
 
     def _extract_inline_command(self, transcript: str) -> str:
         """Return text after wake phrase, or empty string when user said only wake word."""
@@ -404,7 +462,9 @@ class YukiOrchestrator:
                         except: pass
                     continue
                 
-                self.is_speaking = True
+                if not self.is_speaking:
+                    self.is_speaking = True
+                    self._emit("speaking", turn_id=turn_id)
                 
                 if item["type"] == "native":
                     await self._play_native_chunk(item["data"])
@@ -419,7 +479,10 @@ class YukiOrchestrator:
         except Exception as e:
             logger.error(f"Audio playback worker failed: {e}")
         finally:
-            self.is_speaking = False
+            if self.is_speaking:
+                self.is_speaking = False
+                # We don't necessarily go to 'idle' here, the turn manager handles that
+                # but we can send a hint or just let the finally block in _process_turn do it.
 
     async def _play_file_with_interrupt(self, path: str):
         """Play an mp3/wav file via pygame, yielding to asyncio loop allowing interrupt checks."""
@@ -467,6 +530,7 @@ class YukiOrchestrator:
     async def _speak_alert(self, text: str):
         """Dedicated immediate playback path for proactive agent alerts."""
         try:
+            self._emit("speaking")
             from backend.speech import synthesis as cloud_tts
             if self.use_elevenlabs_tts:
                 path = await cloud_tts.synthesize_to_file_async(text)

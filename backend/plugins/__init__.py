@@ -26,11 +26,17 @@ logger = get_logger(__name__)
 
 # ── Registry ──────────────────────────────────────────────────────────────────
 _registry: dict[str, Plugin] = {}
+_discovered = False
 
 
 def _discover_plugins():
     """Scan this package directory, import all modules, register Plugin subclasses."""
+    global _discovered
+    if _discovered:
+        return
+
     package_dir = os.path.dirname(__file__)
+    logger.debug(f"[PLUGINS] Starting discovery in {package_dir}")
 
     for _, module_name, _ in pkgutil.iter_modules([package_dir]):
         if module_name.startswith("_"):
@@ -46,13 +52,16 @@ def _discover_plugins():
                     and attr.name  # must have a name set
                 ):
                     instance = attr()
-                    _registry[instance.name] = instance
-                    logger.info(f"[PLUGINS] Registered: {instance.name}")
+                    if instance.name not in _registry:
+                        _registry[instance.name] = instance
+                        logger.info(f"[PLUGINS] Registered: {instance.name}")
         except Exception as e:
             logger.warning(f"[PLUGINS] Failed to load plugin '{module_name}': {e}")
 
+    _discovered = True
 
-# Auto-discover at import time
+
+# Auto-discover once at import time
 _discover_plugins()
 
 
