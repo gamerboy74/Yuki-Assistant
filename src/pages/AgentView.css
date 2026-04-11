@@ -1,0 +1,145 @@
+/* ── AgentView Optimized Styling ── */
+
+/* ── Orb base image ── */
+.orb-img {
+  transition: filter 0.8s ease, transform 0.8s ease;
+}
+
+/* ── IDLE: gentle breathe + slow drift ── */
+.orb-idle .orb-img {
+  animation: orbBreath 5s ease-in-out infinite;
+  filter: brightness(0.75) saturate(1.1);
+}
+.orb-idle .orb-overlay {
+  background: radial-gradient(circle at 50% 50%, rgba(143,245,255,0.05) 0%, transparent 70%);
+  animation: none;
+}
+.ring-idle {
+  animation: ringIdle 6s ease-in-out infinite;
+  opacity: 0.25;
+}
+
+@keyframes orbBreath {
+  0%,100% { transform: scale(1);    filter: brightness(0.75) saturate(1.1); }
+  50%      { transform: scale(1.04); filter: brightness(0.85) saturate(1.2); }
+}
+@keyframes ringIdle {
+  0%,100% { transform: scale(1);    opacity: 0.25; }
+  50%      { transform: scale(1.04); opacity: 0.40; }
+}
+
+/* ── LISTENING: fast pulse + ripple rings ── */
+.orb-listening .orb-img {
+  animation: orbListen 1.4s ease-in-out infinite;
+  filter: brightness(1) saturate(1.4);
+}
+.orb-listening .orb-overlay {
+  background: radial-gradient(circle at 50% 50%, rgba(143,245,255,0.12) 0%, transparent 65%);
+  animation: overlayListen 1.4s ease-in-out infinite;
+}
+.ring-listening {
+  animation: ringRipple 1.2s ease-out infinite;
+}
+
+@keyframes orbListen {
+  0%,100% { transform: scale(1);    filter: brightness(1) saturate(1.4); }
+  50%      { transform: scale(1.06); filter: brightness(1.15) saturate(1.6); }
+}
+@keyframes overlayListen {
+  0%,100% { opacity: 0.7; }
+  50%      { opacity: 1;   }
+}
+@keyframes ringRipple {
+  0%   { transform: scale(1);    opacity: 0.8; }
+  100% { transform: scale(1.18); opacity: 0;   }
+}
+
+/* ── PROCESSING: spin + hue-rotate ── */
+.orb-processing .orb-img {
+  animation: orbProcess 2s linear infinite;
+  filter: brightness(1) saturate(1.3) hue-rotate(0deg);
+}
+.orb-processing .orb-overlay {
+  background: conic-gradient(from 0deg, rgba(251,191,36,0.18) 0%, transparent 50%, rgba(251,191,36,0.18) 100%);
+  animation: overlaySpin 2s linear infinite;
+}
+.ring-processing {
+  animation: ringProcess 1s ease-in-out infinite;
+}
+
+@keyframes orbProcess {
+  0%   { filter: brightness(1) saturate(1.3) hue-rotate(0deg);   transform: scale(1);    }
+  50%  { filter: brightness(1.1) saturate(1.5) hue-rotate(20deg); transform: scale(1.03); }
+  100% { filter: brightness(1) saturate(1.3) hue-rotate(0deg);   transform: scale(1);    }
+}
+@keyframes overlaySpin {
+  from { transform: rotate(0deg);   }
+  to   { transform: rotate(360deg); }
+}
+@keyframes ringProcess {
+  0%,100% { transform: scale(1);    opacity: 0.6; }
+  50%      { transform: scale(1.08); opacity: 0.9; }
+}
+
+/* ── SPEAKING: throb + magenta shimmer ── */
+.orb-speaking .orb-img {
+  animation: orbSpeak 0.7s ease-in-out infinite;
+  filter: brightness(1.1) saturate(1.6);
+}
+.orb-speaking .orb-overlay {
+  background: radial-gradient(circle at 45% 45%, rgba(255,50,200,0.22) 0%, transparent 60%);
+  animation: overlaySpeak 0.7s ease-in-out infinite;
+}
+.ring-speaking {
+  animation: ringSpeak 0.7s ease-in-out infinite;
+}
+
+@keyframes orbSpeak {
+  0%,100% { transform: scale(1);    filter: brightness(1.1) saturate(1.6); }
+  40%      { transform: scale(1.07); filter: brightness(1.25) saturate(1.9); }
+  70%      { transform: scale(1.04); filter: brightness(1.15) saturate(1.7); }
+}
+@keyframes overlaySpeak {
+  0%,100% { opacity: 0.8; }
+  50%      { opacity: 1;   }
+}
+@keyframes ringSpeak {
+  0%,100% { transform: scale(1);    opacity: 0.9; }
+  50%      { transform: scale(1.10); opacity: 0.5; }
+}
+
+/* ── Decorative arcs ── */
+.arc-rotate  { animation: arcSpin 20s linear infinite; transform-origin: center; transform-box: fill-box; }
+.arc-reverse { animation: arcSpin 30s linear infinite reverse; transform-origin: center; transform-box: fill-box; }
+@keyframes arcSpin {
+  from { transform: rotate(0deg);   }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── UI transitions ── */
+@keyframes fadeUp  { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes msgIn   { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Custom scrollbar */
+::-webkit-scrollbar       { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+
+/* Neural Waveform Animations */
+@keyframes waveActive {
+  0%, 100% { height: 4px; opacity: 0.3; }
+  50% { height: 12px; opacity: 1; }
+}
+.animate-wave-active {
+  animation: waveActive 0.6s ease-in-out infinite;
+}
+
+@keyframes waveThinking {
+  0%, 100% { opacity: 0.2; transform: scaleY(1); }
+  50% { opacity: 0.8; transform: scaleY(1.5); }
+}
+.animate-wave-thinking {
+  animation: waveThinking 1s ease-in-out infinite;
+}

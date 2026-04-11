@@ -3,6 +3,7 @@ import os
 import json
 import asyncio
 import threading
+import time
 from dotenv import load_dotenv
 
 # Path setup
@@ -149,41 +150,51 @@ async def main():
     loop = asyncio.get_running_loop()
     threading.Thread(target=stdin_reader, daemon=True).start()
     
-    # 4. Greeting
+    # 4. Lifecycle Management
     mem.increment_session()
     greeting = mem.get_greeting() or cfg["assistant"]["greeting"]
     send({"type": "idle"})
 
-    async def emit_startup_greeting():
+    async def run_lifecycle():
+        # A. Start neural engines in parallel
+        orch_task = asyncio.create_task(orchestrator.start())
+        
+        # B. Wait for BOTH the UI handshake and Neural priming.
+        # We increase the timeout significantly to 45s to account for high-RAM swap latency.
+        start_time = time.perf_counter()
         try:
-            # Wait for renderer handshake so greeting is not lost during boot.
-            await asyncio.wait_for(ui_ready_event.wait(), timeout=8)
+            # We wait for the UI to be ready, but cap it so we don't hang forever if the UI crashes.
+            await asyncio.wait_for(ui_ready_event.wait(), timeout=45)
+            logger.info(f"UI handshake received in {time.perf_counter() - start_time:.2f}s.")
         except asyncio.TimeoutError:
-            logger.warning("UI ready signal timed out; sending greeting anyway")
+            logger.warning("UI handshake timeout (45s); proceeding with greeting anyway.")
+
+        # C. Ensure models are finished priming before speaking
+        await orch_task
+        
+        # D. Greeting - Now guaranteed to have a ready UI and a loaded voice
         send({"type": "speaking"})
         send({"type": "response", "text": greeting})
-        # Speak greeting to completion, then restore explicit idle state.
-        await asyncio.to_thread(speak, greeting)
+        await orchestrator.speak(greeting)
         send({"type": "idle"})
-    
-    # Launch Orchestrator and Monitor
-    async with asyncio.TaskGroup() as tg:
-        tg.create_task(monitor_loop(stop_event))
-        tg.create_task(orchestrator.start())
-        tg.create_task(emit_startup_greeting())
         
-        # We can speak the greeting using the orchestrator's voice switcher
-        # but let's just let the loop run
-        msg = "Yuki is online and listening (HP-VAD Mode)."
-        logger.info(msg)
-        _log_event(msg)
-        await stop_event.wait()
-        orchestrator.stop()
+        # E. Post-Greeting: Launch background monitoring
+        asyncio.create_task(monitor_loop(stop_event))
+
+    # Run everything
+    lifecycle_task = asyncio.create_task(run_lifecycle())
+    
+    msg = "Yuki status: Online. High-Performance neural links initialized."
+    logger.info(msg)
+    _log_event(msg)
+    
+    await stop_event.wait()
+    orchestrator.stop()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
-    except Exception as e:
-        logger.error(f"Fatal startup error: {e}")
+    except Exception:
+        logger.exception("Fatal startup error in main loop")

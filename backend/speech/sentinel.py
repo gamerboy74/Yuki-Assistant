@@ -32,11 +32,15 @@ class VoiceSentinel:
         self.threshold = min(max(cfg_threshold, 0.1), 0.95)
         self.model = None
         self.utils = None
-        self._load_model()
         
         # Buffer for VAD (Silero expects 512, 1024, or 1536 samples)
         self.chunk_size = 512
-        logger.info(f"VoiceSentinel threshold set to {self.threshold:.2f}")
+        logger.info(f"VoiceSentinel initialized (awaiting neural link). Threshold: {self.threshold:.2f}")
+
+    async def load(self):
+        """Async-friendly model loader."""
+        import asyncio
+        await asyncio.to_thread(self._load_model)
         
     def _load_model(self):
         """Load Silero VAD model from torch hub."""
@@ -65,7 +69,7 @@ class VoiceSentinel:
         Check if a single chunk contains speech.
         Expects 16-bit PCM mono 16kHz audio.
         """
-        if not pcm_data:
+        if not pcm_data or self.model is None:
             return False
             
         # Convert bytes to float32 tensor
@@ -85,7 +89,7 @@ class VoiceSentinel:
 
     def get_speech_confidence(self, pcm_data: bytes) -> float:
         """Return raw confidence score (0.0 to 1.0)"""
-        if not pcm_data:
+        if not pcm_data or self.model is None:
             return 0.0
             
         audio_int16 = np.frombuffer(pcm_data, dtype=np.int16)

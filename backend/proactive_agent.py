@@ -59,6 +59,11 @@ class ProactiveAgent:
         self._thread.start()
         logger.info("[PROACTIVE] Background agent started.")
 
+    async def start_async(self) -> None:
+        """Async-friendly wrapper for modern orchestrators."""
+        import asyncio
+        await asyncio.to_thread(self.start)
+
     def stop(self) -> None:
         self._stop.set()
         if self._thread:

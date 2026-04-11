@@ -16,6 +16,7 @@ import tempfile
 import time
 import collections
 import threading
+import asyncio
 from typing import Literal
 import numpy as np
 
@@ -107,10 +108,11 @@ class AsyncWhisperStreamer:
     Modern, async-friendly interface for faster-whisper.
     Uses in-memory buffers to avoid disk I/O latency.
     """
-    def __init__(self):
+    def __init__(self, local_files_only: bool = True):
         self.model = None
         self.model_size = get_model_size()
-        self._load_model()
+        self.local_files_only = local_files_only
+        logger.info(f"AsyncWhisperStreamer initialized (Neural link: Deferred). Mode: {'Offline' if local_files_only else 'Online'}")
         
     def _load_model(self):
         """Lazy load and warm up the model on the GPU."""
@@ -119,22 +121,33 @@ class AsyncWhisperStreamer:
             import torch
             
             device = "cuda" if torch.cuda.is_available() else "cpu"
+            # Hard-lock float16 for CUDA to maximize tensor core usage
             compute = "float16" if device == "cuda" else "int8"
             
             model_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "whisper")
             os.makedirs(model_path, exist_ok=True)
             
-            logger.info(f"Loading Whisper {self.model_size} on {device.upper()}...")
+            logger.info(f"Loading Whisper {self.model_size} on {device.upper()} (Compute: {compute}, LocalOnly: {self.local_files_only})...")
             self.model = WhisperModel(
                 self.model_size, 
                 device=device, 
                 compute_type=compute,
-                download_root=model_path
+                download_root=model_path,
+                local_files_only=self.local_files_only
             )
-            logger.info("Whisper loaded.")
+            logger.info("Whisper weights linked to GPU.")
         except Exception as e:
+            if self.local_files_only:
+                logger.warning(f"Whisper offline load failed (missing weights?). Retrying with online check: {e}")
+                self.local_files_only = False
+                return self._load_model()
             logger.error(f"Whisper initialization failed: {e}")
             raise
+
+    async def load(self):
+        """Async-friendly model loader."""
+        import asyncio
+        await asyncio.to_thread(self._load_model)
 
     def reload_model(self):
         """Force reload of the whisper model (e.g. if model size changed)."""
@@ -156,17 +169,22 @@ class AsyncWhisperStreamer:
             audio_int16 = np.frombuffer(audio_data, dtype=np.int16)
             audio_float32 = audio_int16.astype(np.float32) / 32768.0
             
-            # Start transcription (runs in thread pool if not explicitly async)
-            segments, info = self.model.transcribe(
-                audio_float32,
-                language=None, # Auto-detect English/Hindi/Hinglish
-                task="transcribe",
-                beam_size=5,
-                vad_filter=True,
-                initial_prompt=WHISPER_INITIAL_PROMPT
-            )
+            # ── Optimization: Offload blocking transcription to thread pool ──
+            # This prevents the Python event loop from freezing during GPU compute.
+            def _run():
+                segments, info = self.model.transcribe(
+                    audio_float32,
+                    language=None, # Auto-detect English/Hindi/Hinglish
+                    task="transcribe",
+                    beam_size=5,
+                    vad_filter=True,
+                    initial_prompt=WHISPER_INITIAL_PROMPT
+                )
+                text = " ".join(seg.text for seg in segments).strip()
+                return text, info
+
+            text, info = await asyncio.to_thread(_run)
             
-            text = " ".join(seg.text for seg in segments).strip()
             if text:
                 logger.info(f"STT [{info.language}]: {text!r}")
             return text
@@ -174,6 +192,13 @@ class AsyncWhisperStreamer:
         except Exception as e:
             logger.error(f"In-memory transcription error: {e}")
             return ""
+
+    async def warm_up(self):
+        """Pre-warm the GPU by running a tiny slice of silence."""
+        logger.info("Warming up Whisper neural engine...")
+        silence = np.zeros(16000, dtype=np.float32)
+        await asyncio.to_thread(self.model.transcribe, silence)
+        logger.info("Whisper engine primed.")
 
 # Legacy compat / helper
 _shared_streamer = None

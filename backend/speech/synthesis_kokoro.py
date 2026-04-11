@@ -6,6 +6,17 @@ import soundfile as sf
 from typing import AsyncGenerator
 from backend.utils.logger import get_logger
 
+# ── Heavy Neural Imports ──
+# Moved to top level for better OS caching and parallel load stability.
+try:
+    from kokoro import KPipeline
+    import torch
+except ImportError:
+    # We allow the file to load for linting/type-checking, 
+    # but runtime will fail gracefully in _load_engine.
+    KPipeline = None
+    torch = None
+
 logger = get_logger(__name__)
 
 # Kokoro language codes: 'a' for American English, 'b' for British, 'j' for Japanese, 'z' for Chinese
@@ -19,14 +30,21 @@ class KokoroEngine:
     """
     def __init__(self):
         self.pipeline = None
-        self._load_engine()
+        logger.info("KokoroEngine initialized (Neural link: Deferred).")
+
+    async def load(self):
+        """Async-friendly model loader."""
+        import asyncio
+        await asyncio.to_thread(self._load_engine)
 
     def _load_engine(self):
         try:
-            from kokoro import KPipeline
-            import torch
-            
             # Initialize pipeline with 'a' (American English) which handles Hinglish well.
+            logger.info("Loading Kokoro-82M weights...")
+            
+            if KPipeline is None:
+                raise ImportError("kokoro library not installed.")
+            
             self.pipeline = KPipeline(lang_code='a') 
             logger.info("Kokoro-82M engine loaded.")
         except Exception as e:
@@ -64,8 +82,11 @@ class HPVoiceSwitcher:
     """
     def __init__(self):
         self.kokoro = KokoroEngine()
-        import edge_tts
         self.hi_voice = "hi-IN-SwaraNeural"
+
+    async def load(self):
+        """Async-friendly loader for the underlying engines."""
+        await self.kokoro.load()
 
     def _is_hindi(self, text: str) -> bool:
         """Detect if text contains Devanagari characters."""
