@@ -156,25 +156,32 @@ async def main():
     send({"type": "idle"})
 
     async def run_lifecycle():
-        # A. Start neural engines in parallel
+        # A. Start neural priming in background
+        _log_event("Priming neural pipelines...")
         orch_task = asyncio.create_task(orchestrator.start())
         
-        # B. Wait for BOTH the UI handshake and Neural priming.
-        # We increase the timeout significantly to 45s to account for high-RAM swap latency.
-        start_time = time.perf_counter()
+        # B. Parallel Wait for UI and Neural Priming
+        # We want to greet as soon as BOTH are ready.
         try:
-            # We wait for the UI to be ready, but cap it so we don't hang forever if the UI crashes.
+            # First, wait for the UI handshake (should be fast)
             await asyncio.wait_for(ui_ready_event.wait(), timeout=45)
-            logger.info(f"UI handshake received in {time.perf_counter() - start_time:.2f}s.")
+            logger.info("UI handshake received.")
+            _log_event("UI Connected. Establishing neural links...")
         except asyncio.TimeoutError:
-            logger.warning("UI handshake timeout (45s); proceeding with greeting anyway.")
+            logger.warning("UI handshake timeout; proceeding anyway.")
 
-        # C. Ensure models are finished priming before speaking
+        # C. Wait for neural priming to complete
         await orch_task
         
-        # D. Greeting - Now guaranteed to have a ready UI and a loaded voice
+        # D. Greeting - Guaranteed UI and loaded voice
+        msg = "Neural link established. Yuki is online."
+        _log_event(msg)
+        
+        # Immediate UI state sync
         send({"type": "speaking"})
         send({"type": "response", "text": greeting})
+        
+        # Audible greeting
         await orchestrator.speak(greeting)
         send({"type": "idle"})
         

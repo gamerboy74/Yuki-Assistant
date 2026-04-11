@@ -69,6 +69,10 @@ class KokoroEngine:
 
             for _, _, audio in generator:
                 if audio is not None:
+                    # Convert to numpy if it's a torch Tensor
+                    if hasattr(audio, 'cpu'):
+                        audio = audio.cpu().numpy()
+                        
                     # Convert float32 [-1, 1] to int16 PCM
                     audio_int16 = (audio * 32767).astype(np.int16).tobytes()
                     yield audio_int16

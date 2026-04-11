@@ -27,6 +27,11 @@
 *   **Command Line Interaction**: A monospaced terminal prompt (`>_`) for lightning-fast text and voice commands.
 *   **HUD Segments**: Information is delivered in structured protocol blocks featuring asymmetric glowing borders and metadata headers.
 *   **Real-time Streaming**: No waiting. Responses crawl onto the screen as Yuki thinks, providing a "living" interface experience.
+31. 
+32. ### 🌐 Observant Browser Research
+33. *   **Self-Sensing Navigation**: Yuki doesn't just open links; she reads them. She can scrape live web content, parse DOM snippets, and provide summaries directly in the HUD.
+34. *   **Nexus Bridge (CDP)**: Direct browser communication over Chrome DevTools Protocol for low-latency element interaction.
+35. *   **Isolated Profiles**: Yuki maintains her own `.yuki_profile` to keep her agentic sessions separate from your personal browsing.
 
 ### 🌊 Reactive Waveform
 *   **Frequency Visualizer**: A 5-bar vertical visualizer integrated directly into the terminal.
@@ -73,6 +78,7 @@ Yuki supports deep OS automation out of the box.
 | Command | Protocol Action |
 | :--- | :--- |
 | `Open YouTube` | Launches YouTube in default browser via Link Map |
+| `Search cricbuzz for scores` | **Observant Research**: Navigates, scrapes, and reports live data |
 | `Pause the song` | Triggers Global Media Control Protocol |
 | `Set volume to 50` | Hardware sound modulation |
 | `Send file to Mom` | Automated WhatsApp File Dispatcher |

@@ -113,7 +113,7 @@ def update_from_dict(new_cfg: dict):
     # sneak into the root instead of staying inside 'assistant'.
     ALLOWED_ROOTS = {
         "assistant", "vad", "whisper", "router", "gemini", 
-        "openai", "ollama", "ai_correction", "tts", "brain"
+        "openai", "ollama", "ai_correction", "tts", "brain", "chrome"
     }
     
     filtered_cfg = {k: v for k, v in new_cfg.items() if k in ALLOWED_ROOTS}

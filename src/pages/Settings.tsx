@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useConfig } from '../hooks/useConfig';
 
-type Tab = 'identity' | 'intelligence' | 'voices' | 'listener';
+type Tab = 'identity' | 'intelligence' | 'voices' | 'listener' | 'nexus';
 
 const WHISPER_MODELS = [
   { id: 'tiny', label: 'Tiny', desc: 'Fastest, lower accuracy' },
@@ -63,6 +63,12 @@ export default function Settings() {
   const [logFastPath, setLogFastPath] = useState(true);
   const [correctionModel, setCorrectionModel] = useState('gemma3:4b');
   const [useLiteFallback, setUseLiteFallback] = useState(true);
+  
+  // Interface Nexus (Chrome/Browser)
+  const [browserPreferred, setBrowserPreferred] = useState('chrome');
+  const [browserFallback, setBrowserFallback] = useState('brave');
+  const [browserAutoLaunch, setBrowserAutoLaunch] = useState(true);
+  const [browserCdpPort, setBrowserCdpPort] = useState(9222);
 
   // Persistence Guard
   const isHydrated = useRef(false);
@@ -128,6 +134,11 @@ export default function Settings() {
         setUseLiteFallback(data.gemini?.use_lite_fallback ?? true);
         setBrainProvider(data.brain?.provider || 'auto');
 
+        setBrowserPreferred(data.chrome?.preferred || 'chrome');
+        setBrowserFallback(data.chrome?.fallback || 'brave');
+        setBrowserAutoLaunch(data.chrome?.auto_launch ?? true);
+        setBrowserCdpPort(data.chrome?.cdp_port ?? 9222);
+
         // Secrets (Ensures they load even if empty in default)
         setGoogleApiKey(data.gemini?.google_api_key || '');
         setOpenaiApiKey(data.openai?.openai_api_key || '');
@@ -182,7 +193,8 @@ export default function Settings() {
     whisperModel, silenceThold, silenceTime, maxRecordSecs,
     geminiModel, geminiFallback, openaiModel, ollamaModel, ollamaUrl, routerOn, brainProvider,
     ttsProvider, ttsVoice, elBudget, speechThold, gainDb, spatialAudio, resamplingHq,
-    googleApiKey, openaiApiKey, elApiKey, elVoiceId, useLiteFallback, correctionModel, fuzzyThold, logFastPath
+    googleApiKey, openaiApiKey, elApiKey, elVoiceId, useLiteFallback, correctionModel, fuzzyThold, logFastPath,
+    browserPreferred, browserFallback, browserAutoLaunch, browserCdpPort
   ]);
   const handleVoiceSelect = (voiceId: string, provider: string) => {
     setTtsVoice(voiceId);
@@ -247,6 +259,12 @@ export default function Settings() {
         },
         brain: {
           provider: brainProvider
+        },
+        chrome: {
+          preferred: browserPreferred,
+          fallback: browserFallback,
+          auto_launch: browserAutoLaunch,
+          cdp_port: browserCdpPort
         }
       };
 
@@ -723,6 +741,125 @@ export default function Settings() {
   );
 
 
+  const renderNexus = () => (
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div>
+        <h2 className="font-headline text-3xl font-bold tracking-tight text-on-surface uppercase mb-2">Interface Nexus</h2>
+        <p className="font-label text-sm text-on-surface-variant">Manage external research engines and neural connectivity bridges.</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        {/* Browser Engine Selection */}
+        <div className="bg-surface-container-low p-8 border border-outline-variant/20 relative overflow-hidden group">
+          <div className="absolute inset-0 dot-grid opacity-5"></div>
+          <h3 className="font-label text-xs uppercase tracking-[0.2em] text-primary mb-6 font-bold flex items-center gap-3">
+            <span className="w-2 h-2 bg-primary animate-pulse"></span>
+            Neural Research Engine
+          </h3>
+          
+          <div className="grid grid-cols-2 gap-4">
+            {[
+              { id: 'chrome', label: 'Chrome', icon: 'globe', desc: 'Standard Engine' },
+              { id: 'brave', label: 'Brave', icon: 'shield', desc: 'Secure Sandbox' }
+            ].map(b => (
+              <div key={b.id} onClick={() => setBrowserPreferred(b.id)}
+                className={`p-6 border cursor-pointer transition-all flex flex-col items-center gap-4 ${browserPreferred === b.id ? 'border-primary bg-primary/10 shadow-[0_0_20px_rgba(var(--primary-rgb),0.1)]' : 'border-outline-variant/20 bg-surface-container hover:border-primary/50'}`}>
+                <span className="material-symbols-outlined text-4xl" style={{ color: browserPreferred === b.id ? 'var(--md-sys-color-primary)' : 'var(--md-sys-color-on-surface-variant)' }}>{b.icon}</span>
+                <div className="text-center">
+                  <div className={`font-headline font-bold text-sm ${browserPreferred === b.id ? 'text-primary' : 'text-on-surface'}`}>{b.label.toUpperCase()}</div>
+                  <div className="font-label text-[9px] text-on-surface-variant mt-1 uppercase tracking-tighter">{b.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="font-label text-[9px] text-on-surface-variant mt-6 opacity-50 uppercase tracking-widest italic leading-relaxed">
+            Yuki uses these engines to perceive live web content. Isolated profiles are used to prevent session collisions.
+          </p>
+        </div>
+
+        {/* Connectivity Control */}
+        <div className="space-y-8">
+          <div className="bg-surface-container-low p-6 border border-outline-variant/20 flex items-center justify-between cursor-pointer hover:bg-surface-container" onClick={() => setBrowserAutoLaunch(!browserAutoLaunch)}>
+            <div>
+              <div className="font-label text-xs font-bold text-on-surface uppercase tracking-widest">Autonomous Launch</div>
+              <div className="font-label text-[8px] text-on-surface-variant uppercase mt-1">Initialize engine during kernel boot.</div>
+            </div>
+            <div className={`w-10 h-5 rounded-none flex items-center p-1 transition-colors ${browserAutoLaunch ? 'bg-primary' : 'bg-surface-container-highest border border-outline-variant/50'}`}>
+              <div className={`h-3 w-3 bg-background transition-transform ${browserAutoLaunch ? 'translate-x-5' : 'translate-x-0'}`} />
+            </div>
+          </div>
+
+          <div className="bg-surface-container-low p-6 border border-outline-variant/20 relative group">
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-secondary/20 to-secondary/5 blur opacity-0 group-hover:opacity-100 transition duration-500" />
+            <div className="relative space-y-4">
+              <label className="font-label text-xs uppercase tracking-widest text-secondary font-bold block">Neural Link Port (CDP)</label>
+              <div className="flex gap-2">
+                <input type="number" value={browserCdpPort} onChange={e => setBrowserCdpPort(Number(e.target.value))} 
+                  className="flex-grow bg-surface-container-highest/50 border border-outline-variant/20 p-3 text-on-surface font-mono text-sm focus:border-secondary outline-none transition-colors" />
+                <div className="bg-secondary/10 px-4 flex items-center border border-secondary/20">
+                  <span className="font-mono text-[10px] text-secondary font-bold">TCP</span>
+                </div>
+              </div>
+              <p className="font-label text-[8px] text-on-surface-variant uppercase tracking-widest opacity-60">
+                Communication bridge for agentic navigation tasks. Default: 9222.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-surface-container-low p-6 border border-outline-variant/20">
+            <label className="font-label text-xs uppercase tracking-widest text-on-surface-variant font-bold mb-3 block">Resilience Fallback</label>
+            <div className="flex items-center gap-4">
+               <select value={browserFallback} onChange={e => setBrowserFallback(e.target.value)}
+                className="w-full bg-surface-container-highest border border-outline-variant/20 p-3 text-on-surface font-label text-xs outline-none focus:border-primary transition-colors appearance-none">
+                <option value="chrome">CHROME CORE</option>
+                <option value="brave">BRAVE SHIELD</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Interface Logic Schematic (Nexus Style) */}
+      <div className="bg-[#0a0a0f] p-10 border border-primary/20 relative overflow-hidden">
+        <div className="absolute inset-0 grid grid-cols-6 grid-rows-4 opacity-5 pointer-events-none">
+          {Array.from({ length: 24 }).map((_, i) => (
+            <div key={i} className="border border-primary/10"></div>
+          ))}
+        </div>
+        
+        <div className="relative z-10 flex flex-col items-center">
+          <div className="w-12 h-12 rounded-full border border-primary/40 bg-primary/5 flex items-center justify-center animate-pulse mb-6">
+            <span className="material-symbols-outlined text-primary">hub</span>
+          </div>
+          <h3 className="font-headline text-lg font-black text-primary tracking-[0.3em] uppercase mb-1">Nexus Bridge</h3>
+          <p className="font-label text-[10px] text-on-surface-variant uppercase tracking-widest mb-10 opacity-60 italic">Multi-Engine Orchestration Layer</p>
+          
+          <div className="flex items-center gap-12">
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-10 h-10 border border-outline-variant/30 flex items-center justify-center text-on-surface-variant">
+                <span className="material-symbols-outlined">browser_updated</span>
+              </div>
+              <span className="font-label text-[8px] uppercase tracking-tighter">Playwright API</span>
+            </div>
+            <div className="w-12 h-[1px] bg-gradient-to-r from-transparent via-primary/40 to-transparent"></div>
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-10 h-10 border border-primary/40 rounded-full flex items-center justify-center text-primary bg-primary/10">
+                <span className="material-symbols-outlined animate-spin" style={{ animationDuration: '10s' }}>settings_heart</span>
+              </div>
+              <span className="font-label text-[8px] uppercase tracking-tighter text-primary">Yuki Logic</span>
+            </div>
+            <div className="w-12 h-[1px] bg-gradient-to-r from-transparent via-secondary/40 to-transparent"></div>
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-10 h-10 border border-outline-variant/30 flex items-center justify-center text-on-surface-variant">
+                <span className="material-symbols-outlined">terminal</span>
+              </div>
+              <span className="font-label text-[8px] uppercase tracking-tighter">CDP Bridge</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   const renderConfig = () => (
     <div className="space-y-12 animate-in fade-in duration-500">
@@ -1089,7 +1226,8 @@ export default function Settings() {
             { id: 'identity', label: 'Identity' },
             { id: 'intelligence', label: 'Intelligence' },
             { id: 'voices', label: 'Voices' },
-            { id: 'listener', label: 'Listener' }
+            { id: 'listener', label: 'Listener' },
+            { id: 'nexus', label: 'Nexus' }
           ].map(tab => (
             <button key={tab.id} onClick={() => setActiveTab(tab.id as Tab)}
               className={`pb-4 border-b-2 font-label text-xs font-bold tracking-widest uppercase transition-colors whitespace-nowrap ${activeTab === tab.id ? 'border-primary text-primary' : 'border-transparent text-secondary opacity-60 hover:opacity-100 hover:text-on-surface'}`}>
@@ -1104,8 +1242,9 @@ export default function Settings() {
         <div className="max-w-5xl mx-auto pb-20">
           {activeTab === 'identity' && renderCore()}
           {activeTab === 'intelligence' && renderNeural()}
-          {activeTab === 'voices' && renderConfig()}
-          {activeTab === 'listener' && renderThreads()}
+          { activeTab === 'voices' && renderConfig()}
+          { activeTab === 'listener' && renderThreads()}
+          { activeTab === 'nexus' && renderNexus()}
         </div>
       </div>
 

@@ -7,6 +7,7 @@ Token-optimized: selective tool loading + chat fast path.
 
 import os
 import re
+import json
 import asyncio
 from typing import AsyncGenerator
 from google import genai
@@ -19,6 +20,7 @@ from backend.brain.shared import (
     is_conversational,
     add_user_message,
     add_assistant_message,
+    add_tool_messages,
     get_history,
 )
 from backend.brain.tools import get_tools_for_query
@@ -99,13 +101,16 @@ async def _process_turn(
                     tool_calls.append(fc)
                     yield {"type": "tool_start", "value": fc.name}
             
-        # Extract usage metadata from the chunk (usually present in the final chunk of a candidate)
+        # Extract usage metadata from the chunk (usually present in the final chunk)
         if chunk.usage_metadata:
+            in_t = chunk.usage_metadata.prompt_token_count
+            out_t = chunk.usage_metadata.candidates_token_count
+            logger.debug(f"[GEMINI USAGE] {model_name}: {in_t} in, {out_t} out")
             yield {
                 "type": "usage",
                 "model": model_name,
-                "input": chunk.usage_metadata.prompt_token_count,
-                "output": chunk.usage_metadata.candidates_token_count
+                "input": in_t,
+                "output": out_t
             }
 
     if buffer.strip():
@@ -143,6 +148,27 @@ async def _process_turn(
         )
 
     contents.append(types.Content(role="user", parts=tool_responses))
+
+    # ── Persist to Shared History ───────────────────────────────────────
+    # This was missing! Without this, Gemini forgets past tool calls.
+    assistant_msg = {
+        "role": "assistant",
+        "content": full_turn_text if full_turn_text else None,
+        "tool_calls": [
+            {
+                "id": f"call_{fc.name}_{step}",
+                "type": "function",
+                "function": {"name": fc.name, "arguments": fc.args},
+            }
+            for fc in tool_calls
+        ],
+    }
+    tool_result_msgs = [
+        {"role": "tool", "name": fc.name, "content": str(res)}
+        for fc, res in zip(tool_calls, results)
+    ]
+    add_tool_messages(assistant_msg, tool_result_msgs)
+
     yield {"type": "continue"}
 
 
@@ -166,9 +192,48 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
     current_contents = []
     for entry in get_history():
         role = "user" if entry["role"] == "user" else "model"
-        current_contents.append(
-            types.Content(role=role, parts=[types.Part(text=entry["content"])])
-        )
+        parts = []
+
+        # 1. Handle Tool Results (OpenAI-style role='tool')
+        if entry["role"] == "tool":
+            role = "user"
+            parts.append(
+                types.Part(
+                    function_response=types.FunctionResponse(
+                        name=entry.get("name", "unknown"),
+                        response={"result": entry["content"]}
+                    )
+                )
+            )
+        
+        # 2. Handle Assistant Tool Calls (OpenAI-style tool_calls)
+        elif entry.get("tool_calls"):
+            role = "model"
+            if entry.get("content"):
+                parts.append(types.Part(text=entry["content"]))
+            
+            for tc in entry["tool_calls"]:
+                args = tc["function"]["arguments"]
+                if isinstance(args, str):
+                    try: 
+                        args = json.loads(args)
+                    except: 
+                        pass
+                
+                parts.append(
+                    types.Part(
+                        function_call=types.FunctionCall(
+                            name=tc["function"]["name"],
+                            args=args
+                        )
+                    )
+                )
+
+        # 3. Handle Regular Text
+        else:
+            parts.append(types.Part(text=entry["content"] or ""))
+
+        current_contents.append(types.Content(role=role, parts=parts))
 
     # ── Configuration Entry Point ─────────────────────────────────────
     api_key = cfg.get("gemini", {}).get("google_api_key") or os.environ.get("GOOGLE_API_KEY", "")

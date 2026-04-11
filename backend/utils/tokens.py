@@ -14,6 +14,9 @@ _RATES = {
     "gpt-4o": (5.00, 15.00),
     "gemini-2.0-flash": (0.10, 0.40),
     "gemini-2.0-flash-lite": (0.075, 0.30),
+    "gemini-2.5-flash": (0.10, 0.40),
+    "gemini-2.5-flash-lite": (0.075, 0.30),
+    "gemini-3.0-flash": (0.10, 0.40), # Provisional rates
     "gemini-1.5-flash": (0.10, 0.40),
     "gemini-1.5-pro": (3.50, 10.50),
 }
@@ -33,17 +36,26 @@ def calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     # Normalize model name for lookup
     m = model.lower()
     
-    # Try exact match, then substring match
+    # Clean model name (remove vendor prefix if present)
+    if "/" in m:
+        m = m.split("/")[-1]
+    
+    # Try exact match, then versioned match
     rate = _RATES.get(m)
     if not rate:
+        # Check for model families (e.g., 'gemini-2.0' in 'gemini-2.0-flash-v1')
         for k, v in _RATES.items():
             if k in m:
                 rate = v
                 break
     
-    # Fallback to gpt-4o-mini rates if unknown
+    # Last resort: generic family fallback
     if not rate:
-        rate = _RATES["gpt-4o-mini"]
+        if "gemini" in m:
+            # Default to standard flash rates for any unknown Gemini
+            rate = _RATES["gemini-2.0-flash"]
+        else:
+            rate = _RATES["gpt-4o-mini"]
         
     input_rate, output_rate = rate
     

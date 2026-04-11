@@ -53,5 +53,11 @@
   },
   "brain": {
     "provider": "openai"
+  },
+  "chrome": {
+    "preferred": "chrome",
+    "fallback": "brave",
+    "auto_launch": true,
+    "cdp_port": 9222
   }
 }

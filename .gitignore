@@ -49,3 +49,5 @@ tsconfig.tsbuildinfo
 
 # ── Yuki personal data (memory, history) — never commit ───────────────────────
 backend/data/
+
+build/

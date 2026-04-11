@@ -20,7 +20,8 @@ _ALL_TOOLS: list[dict[str, Any]] = [
     {"type": "function", "function": {"name": "system_info", "description": "Get system info: time, date, battery, cpu, or ram.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "time, date, battery, cpu, ram"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "set_volume", "description": "Set system volume (0-100)", "parameters": {"type": "object", "properties": {"level": {"type": "integer"}}, "required": ["level"]}}},
     {"type": "function", "function": {"name": "set_brightness", "description": "Set brightness (0-100)", "parameters": {"type": "object", "properties": {"level": {"type": "integer"}}, "required": ["level"]}}},
-    {"type": "function", "function": {"name": "open_app", "description": "Open app or URL", "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}},
+    {"type": "function", "function": {"name": "open_app", "description": "Open a native Windows application (e.g., 'Notepad', 'Calculator', 'File Explorer').", "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}},
+    {"type": "function", "function": {"name": "open_file", "description": "Open a specific file locally (e.g., 'notes.txt', 'my_doc.pdf'). Yuki handles the path resolution.", "parameters": {"type": "object", "properties": {"path": {"type": "string", "description": "The name or path of the file to open"}}, "required": ["path"]}}},
     {"type": "function", "function": {"name": "close_app", "description": "Close app by name or 'active' window", "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}},
     {"type": "function", "function": {"name": "search_internet", "description": "Search web for facts/news", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "media_controls", "description": "Media: playpause, next, previous", "parameters": {"type": "object", "properties": {"action": {"type": "string", "enum": ["playpause", "next", "previous"]}}, "required": ["action"]}}},
@@ -42,6 +43,11 @@ _ALL_TOOLS: list[dict[str, Any]] = [
     {"type": "function", "function": {"name": "search_in_chrome", "description": "Search in Chrome & return info", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "smart_navigate", "description": "Navigate app UI tree", "parameters": {"type": "object", "properties": {"target": {"type": "string"}, "action": {"type": "string", "enum": ["click", "focus", "list"]}}, "required": ["target"]}}},
     {"type": "function", "function": {"name": "design_web_page", "description": "Generate premium UI (Tailwind). Use a slug/name for 'path' (e.g. 'landing_page').", "parameters": {"type": "object", "properties": {"content": {"type": "string"}, "path": {"type": "string", "description": "Slug or filename for the design"}}, "required": ["content"]}}},
+    {"type": "function", "function": {"name": "read_active_tab", "description": "Extract ALL visible text from the current browser page. Use this to summarize articles, read news, or analyze website content.", "parameters": {"type": "object", "properties": {"max_chars": {"type": "integer", "default": 4000}}}}},
+    {"type": "function", "function": {"name": "browser_navigate", "description": "Navigate the browser to a specific URL. Required before using read_active_tab for a specific site.", "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}}},
+    {"type": "function", "function": {"name": "browser_click", "description": "Click an element (link, button) by its text or CSS selector.", "parameters": {"type": "object", "properties": {"target": {"type": "string"}}, "required": ["target"]}}},
+    {"type": "function", "function": {"name": "get_page_elements", "description": "List clickable elements on the current page. Helps you know what can be clicked.", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "browser_scroll", "description": "Scroll the active browser page.", "parameters": {"type": "object", "properties": {"direction": {"type": "string", "enum": ["up", "down"]}}, "required": ["direction"]}}},
 ]
 
 # Build name → tool lookup
@@ -55,8 +61,9 @@ _TOOL_INDEX: dict[str, dict] = {
 # Extended tools are only added when keywords match.
 
 CORE_TOOLS = [
-    "system_info", "open_app", "close_app", "search_internet",
+    "system_info", "open_app", "open_file", "close_app", "search_internet",
     "media_controls", "get_weather", "play_youtube", "play_spotify",
+    "read_active_tab", "browser_navigate", "type_text"
 ]
 
 # Keyword → additional tool names to include
@@ -97,8 +104,8 @@ _KEYWORD_ROUTES: list[tuple[re.Pattern, list[str]]] = [
     (re.compile(r"fetch|http|api|url|download", re.I),
      ["http_get"]),
 
-    (re.compile(r"chrome|browser|search.*in", re.I),
-     ["search_in_chrome"]),
+    (re.compile(r"chrome|browser|search.*in|read.*page|scroll|navigate|open.*url|click|score|ipl|cricbuzz|espncricinfo|cric", re.I),
+     ["search_in_chrome", "browser_scroll", "browser_click", "get_page_elements"]),
 
     (re.compile(r"my\s*(name|info|preference|detail|fact)", re.I),
      ["get_user_info"]),

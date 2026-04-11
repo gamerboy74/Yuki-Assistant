@@ -18,6 +18,10 @@ export interface AssistantConfig {
   brain: {
     provider: string;
   };
+  chrome: {
+    preferred: string;
+    autoLaunch: boolean;
+  };
 }
 
 export function useConfig(): AssistantConfig {
@@ -29,7 +33,11 @@ export function useConfig(): AssistantConfig {
     idleLabel: a.idle_label,
     ttsVoice:  a.tts_voice,
     brain: {
-      provider: (config as any).brain?.provider || 'gemini'
+      provider: (config as any).brain?.provider || 'openai'
+    },
+    chrome: {
+      preferred: (config as any).chrome?.preferred || 'chrome',
+      autoLaunch: (config as any).chrome?.auto_launch ?? true
     }
   };
 }

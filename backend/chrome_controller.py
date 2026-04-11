@@ -73,13 +73,19 @@ def _is_cdp_available() -> bool:
 
 def _launch_browser() -> bool:
     """Launch Chrome or Brave with CDP debugging port."""
+    # Create an isolated profile directory in the project root to avoid locks
+    profile_dir = Path.cwd() / ".yuki_profile"
+    profile_dir.mkdir(exist_ok=True)
+
     for browser in [_PREFERRED, _FALLBACK]:
         exe = _find_browser_exe(browser)
         if exe:
             logger.info(f"Launching {browser} with CDP on port {_CDP_PORT}...")
             subprocess.Popen(
                 [exe, f"--remote-debugging-port={_CDP_PORT}",
-                 "--no-first-run", "--no-default-browser-check"],
+                 f"--user-data-dir={profile_dir}",
+                 "--no-first-run", "--no-default-browser-check",
+                 "--disable-features=TabGroupsContinuation,MainProfilePicker,FileSelectionDialogs"],
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
             # Wait for CDP to become available (up to 5s)
@@ -111,19 +117,43 @@ def _get_playwright_browser():
         return None, None
 
 
+def _get_active_page(browser):
+    """Reliably get the active page or create a new one."""
+    if not browser.contexts:
+        return browser.new_page()
+    context = browser.contexts[0]
+    if not context.pages:
+        return context.new_page()
+    return context.pages[0]
+
+
 # ── Public action functions ───────────────────────────────────────────────────
 
 def navigate(url: str) -> str:
-    """Navigate the active Chrome tab to a URL."""
+    """Navigate the active Chrome tab to a URL. Returns title + content snippet."""
+    if not url:
+        return "No URL provided."
+    
+    # Prepend https if it looks like a domain without a protocol
+    if not (url.startswith(("http://", "https://", "www.")) or "://" in url):
+        if "." in url and " " not in url:
+            url = "https://" + url
+    elif url.startswith("www."):
+        url = "https://" + url
+
     pw, browser = _get_playwright_browser()
     if not browser:
         return f"Chrome not available. Opening {url} in default browser."
     try:
-        page = browser.contexts[0].pages[0] if browser.contexts and browser.contexts[0].pages else browser.new_page()
-        page.goto(url, wait_until="domcontentloaded", timeout=10000)
+        page = _get_active_page(browser)
+        page.goto(url, wait_until="domcontentloaded", timeout=15000)
+        
         title = page.title()
+        # Get a snippet so the model 'sees' the page immediately
+        snippet = page.evaluate("() => document.body.innerText.slice(0, 500)")
+        
         logger.info(f"Navigated to: {url} — Title: {title}")
-        return f"Opened: {title}"
+        return f"SUCCESS: Navigated to '{title}'.\n\nPage Snippet:\n{snippet}\n\nUse 'read_active_tab' for full extraction."
     except Exception as e:
         logger.error(f"navigate error: {e}")
         return f"Navigation failed: {str(e)[:80]}"
@@ -133,8 +163,39 @@ def navigate(url: str) -> str:
 
 
 def search_web(query: str) -> str:
+    """Open search and return status. Use 'read_active_tab' to get results."""
     url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
     return navigate(url)
+
+
+def search_web_and_read(query: str) -> str:
+    """Perform a web search in Chrome and return the top results text. Bypasses 429 API blocks."""
+    pw, browser = _get_playwright_browser()
+    if not browser: return "Chrome not available."
+    try:
+        page = _get_active_page(browser)
+        page.goto(f"https://www.google.com/search?q={query.replace(' ', '+')}", wait_until="domcontentloaded", timeout=15000)
+        
+        # Try to extract the search result titles and snippets
+        results = page.evaluate("""() => {
+            const items = Array.from(document.querySelectorAll('.g, .WwSWHc, .MjjYud')).slice(0, 5);
+            return items.map(el => {
+                const title = el.querySelector('h3')?.innerText || 'No Title';
+                const body = el.querySelector('.VwiC3b')?.innerText || '';
+                return `Title: ${title}\nContent: ${body}`;
+            }).join('\\n\\n');
+        }""")
+        
+        if not results:
+             # Fallback to whole page text if selector fails
+             results = page.evaluate("() => document.body.innerText.slice(0, 2000)")
+
+        return f"Browser Search Results for '{query}':\n\n{results}"
+    except Exception as e:
+        return f"Browser search failed: {e}"
+    finally:
+        try: pw.stop()
+        except: pass
 
 
 def youtube_search(query: str) -> str:
@@ -145,8 +206,8 @@ def youtube_search(query: str) -> str:
         webbrowser.open(f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}")
         return f"YouTube search opened for: {query}"
     try:
-        page = browser.contexts[0].pages[0] if browser.contexts and browser.contexts[0].pages else browser.new_page()
-        page.goto(f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}", timeout=10000)
+        page = _get_active_page(browser)
+        page.goto(f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}", timeout=15000)
         page.wait_for_selector("ytd-video-renderer", timeout=5000)
         # Click first non-ad video
         page.click("ytd-video-renderer #video-title", timeout=3000)
@@ -167,8 +228,8 @@ def whatsapp_web_send(contact: str, message: str) -> str:
     if not browser:
         return "Browser not available for WhatsApp Web."
     try:
-        page = browser.contexts[0].pages[0] if browser.contexts and browser.contexts[0].pages else browser.new_page()
-        page.goto("https://web.whatsapp.com", timeout=15000)
+        page = _get_active_page(browser)
+        page.goto("https://web.whatsapp.com", timeout=25000)
         page.wait_for_selector('[data-testid="chat-list"]', timeout=20000)
 
         # Search for contact
@@ -199,9 +260,8 @@ def get_active_url() -> str:
     if not browser:
         return "Browser not accessible."
     try:
-        pages = browser.contexts[0].pages if browser.contexts else []
-        url = pages[0].url if pages else "No page open"
-        return url
+        page = _get_active_page(browser)
+        return page.url
     except Exception as e:
         return f"Error: {e}"
     finally:
@@ -209,19 +269,87 @@ def get_active_url() -> str:
         except: pass
 
 
-def get_page_text(max_chars: int = 2000) -> str:
-    """Extract visible text from the current page."""
+def get_page_text(max_chars: int = 4000) -> str:
+    """Extract visible content text from the current page, strictly filtering out UI noise."""
     pw, browser = _get_playwright_browser()
     if not browser:
         return "Browser not accessible."
     try:
-        pages = browser.contexts[0].pages if browser.contexts else []
-        if not pages:
-            return "No page is open."
-        text = pages[0].inner_text("body")
+        page = _get_active_page(browser)
+        
+        # More aggressive noise filtering
+        text = page.evaluate("""() => {
+            const body = document.body.cloneNode(true);
+            const selectorsToHide = [
+                'nav', 'header', 'footer', 'script', 'style', 'aside', 'iframe', 'noscript',
+                '.nav', '.footer', '.header', '#header', '#footer', '.sidebar', '.ad', '.cookie'
+            ];
+            selectorsToHide.forEach(s => {
+                body.querySelectorAll(s).forEach(el => el.remove());
+            });
+            // Also remove invisible elements
+            body.querySelectorAll('*').forEach(el => {
+                if (window.getComputedStyle(el).display === 'none') el.remove();
+            });
+            return body.innerText;
+        }""")
+        
         return text[:max_chars].strip()
     except Exception as e:
         return f"Could not read page: {e}"
+    finally:
+        try: pw.stop()
+        except: pass
+
+
+def get_interactive_elements() -> str:
+    """Returns a concise list of potentially clickable elements (links, buttons)."""
+    pw, browser = _get_playwright_browser()
+    if not browser:
+        return "Browser not available."
+    try:
+        page = _get_active_page(browser)
+        
+        # Extract meaningful links/buttons
+        elements = page.evaluate("""() => {
+            const elms = Array.from(document.querySelectorAll('a, button, [role="button"]'));
+            return elms
+                .map(el => ({
+                    text: el.innerText.trim(),
+                    tag: el.tagName.toLowerCase(),
+                    visible: !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length)
+                }))
+                .filter(el => el.visible && el.text.length > 2 && el.text.length < 100)
+                .slice(0, 30) // Limit to top 30
+                .map(el => `[${el.tag}] ${el.text}`)
+                .join('\\n');
+        }""")
+        return f"Interactive elements:\\n{elements}" if elements else "No interactive elements found."
+    except Exception as e:
+        return f"Error getting elements: {e}"
+    finally:
+        try: pw.stop()
+        except: pass
+
+
+def click_element(target: str) -> str:
+    """Click an element by text match or selector."""
+    pw, browser = _get_playwright_browser()
+    if not browser: return "Browser not available."
+    try:
+        page = _get_active_page(browser)
+
+        # Try clicking by text first
+        try:
+            # case-insensitive text match
+            page.get_by_text(target, exact=False).first.click(timeout=5000)
+            return f"Clicked element matching: '{target}'"
+        except:
+            # Fallback to selector
+            page.click(target, timeout=3000)
+            return f"Clicked selector: '{target}'"
+    except Exception as e:
+        return f"Click failed: {e}"
     finally:
         try: pw.stop()
         except: pass
@@ -264,11 +392,9 @@ def scroll(direction: str = "down") -> str:
     if not browser:
         return "Browser not available."
     try:
-        pages = browser.contexts[0].pages if browser.contexts else []
-        if not pages:
-            return "No page open."
-        delta = 500 if direction == "down" else -500
-        pages[0].mouse.wheel(0, delta)
+        page = _get_active_page(browser)
+        delta = 600 if direction == "down" else -600
+        page.mouse.wheel(0, delta)
         return f"Scrolled {direction}."
     except Exception as e:
         return f"Scroll failed: {e}"
@@ -283,10 +409,8 @@ def take_screenshot_bytes() -> bytes | None:
     if not browser:
         return None
     try:
-        pages = browser.contexts[0].pages if browser.contexts else []
-        if not pages:
-            return None
-        return pages[0].screenshot()
+        page = _get_active_page(browser)
+        return page.screenshot()
     except Exception:
         return None
     finally:

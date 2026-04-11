@@ -24,9 +24,12 @@ export default defineConfig({
     },
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom'],
-          utils: ['zustand', 'react-router-dom'], 
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('react') || id.includes('react-dom')) return 'vendor';
+            if (id.includes('zustand') || id.includes('react-router-dom')) return 'utils';
+            return 'vendor'; // Fallback for other node_modules
+          }
         },
       },
     },

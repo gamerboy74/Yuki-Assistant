@@ -3,7 +3,7 @@ import json
 import os
 import re
 import time
-import audioop
+
 import numpy as np
 from typing import AsyncGenerator, Callable
 from backend.utils.logger import get_logger
@@ -32,10 +32,8 @@ class YukiOrchestrator:
         self.brain_stream = process_stream
         self.voice_switcher = HPVoiceSwitcher()
         self.wake_detector = WakeWordDetector()
-        self.use_elevenlabs_tts = bool(
-            os.environ.get("ELEVENLABS_API_KEY") and os.environ.get("ELEVENLABS_VOICE_ID")
-        )
-        if self.use_elevenlabs_tts:
+        # Log initial TTS provider status
+        if self._check_elevenlabs_ready():
             logger.info("TTS provider: ElevenLabs (with local fallback)")
         else:
             logger.info("TTS provider: Local Kokoro/Edge (ElevenLabs keys not fully configured)")
@@ -84,6 +82,18 @@ class YukiOrchestrator:
         # Buffers
         self.audio_buffer = bytearray()
         self.recording = False
+
+    def _check_elevenlabs_ready(self) -> bool:
+        """Check if ElevenLabs TTS is configured — checks config file AND env vars."""
+        key = cfg.get("tts", {}).get("elevenlabs_api_key") or os.environ.get("ELEVENLABS_API_KEY", "")
+        voice = cfg.get("tts", {}).get("elevenlabs_voice_id") or os.environ.get("ELEVENLABS_VOICE_ID", "")
+        provider = cfg.get("tts", {}).get("provider", "elevenlabs").lower()
+        return bool(key and voice and provider == "elevenlabs")
+
+    @property
+    def use_elevenlabs_tts(self) -> bool:
+        """Dynamic property — always reflects live config state."""
+        return self._check_elevenlabs_ready()
 
     def _new_turn_id(self) -> str:
         self._turn_counter += 1
@@ -358,6 +368,9 @@ class YukiOrchestrator:
             self._emit("transcript", turn_id=turn_id, text=transcript)
             self._log(f"Processing command: '{transcript}'")
 
+        # Conversational Turn Tracking: 1 user interaction = 1 turn
+        self.session_usage["turns"] += 1
+
         # Start parallel background synthesis and playback queues
         self.stop_playback_event.clear()
         self._synth_queue = asyncio.Queue()
@@ -389,9 +402,8 @@ class YukiOrchestrator:
                 self.session_usage["input"] += m_input
                 self.session_usage["output"] += m_output
                 self.session_usage["cost"] += cost
-                self.session_usage["turns"] += 1
                 
-                self._emit("usage_update", **self.session_usage)
+                self._emit("usage_update", data=self.session_usage)
                 logger.info(f"[ORCHESTRATOR] Session Usage Updated: {self.session_usage['input']} in, {self.session_usage['output']} out. Total Cost: ${self.session_usage['cost']:.6f}")
 
             elif event["type"] == "tool_start":

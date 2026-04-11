@@ -28,8 +28,20 @@ def _launch_app_target(target: str) -> None:
 
     lowered = target.lower()
 
-    # URLs and protocol handlers should go through the shell registration table.
-    if lowered.startswith(("http://", "https://")) or "://" in target or target.endswith(":"):
+    # Robust URL detection: check for protocol, then check for domain patterns
+    is_url = lowered.startswith(("http://", "https://", "www.")) or "://" in target or target.endswith(":")
+    
+    # If it looks like a domain (e.g. google.com) but lacks protocol
+    if not is_url and "." in target and " " not in target and "\\" not in target:
+        is_url = True
+        if not lowered.startswith("www."):
+            target = "https://" + target
+        else:
+            target = "https://" + target # startfile handles www. but https is safer
+    
+    if is_url:
+        if target.lower().startswith("www."):
+            target = "https://" + target
         os.startfile(target)
         return
 
@@ -165,12 +177,21 @@ def dispatch_tool(tool_name: str, arguments: str | dict) -> str:
 
             search_query = _enrich_live_query(query)
 
-            # Preferred provider: ddgs (new package name). Keep legacy compatibility.
-            try:
-                from ddgs import DDGS
+            def _run_search(q):
+                # Try ddgs then duckduckgo_search
+                try:
+                    from ddgs import DDGS
+                    return list(DDGS().text(q, max_results=10))
+                except Exception:
+                    try:
+                        from duckduckgo_search import DDGS
+                        return list(DDGS().text(q, max_results=10))
+                    except Exception as e:
+                        raise e
 
-                results = DDGS().text(search_query, max_results=10)
-                results = _rank_search_results(query, list(results))[:4]
+            try:
+                results = _run_search(search_query)
+                results = _rank_search_results(query, results)[:4]
                 if not results:
                     return f"No internet results found for '{query}'."
 
@@ -179,33 +200,45 @@ def dispatch_tool(tool_name: str, arguments: str | dict) -> str:
                     output += f"{i}. {r.get('title')}\n{r.get('body')}\n\n"
                 return output
             except Exception as e:
-                logger.warning(f"search_internet ddgs provider failed: {e}")
-
-            try:
-                from duckduckgo_search import DDGS
-
-                results = DDGS().text(search_query, max_results=10)
-                results = _rank_search_results(query, list(results))[:4]
-                if not results:
-                    return f"No internet results found for '{query}'."
-
-                output = f"Internet search results for '{query}':\n\n"
-                for i, r in enumerate(results, 1):
-                    output += f"{i}. {r.get('title')}\n{r.get('body')}\n\n"
-                return output
-            except Exception as e:
-                logger.warning(f"search_internet legacy provider failed: {e}")
+                err_msg = str(e).lower()
+                logger.warning(f"search_internet failed: {e}")
+                
+                # Pivot to Browser if rate-limited (429) or other API blocks
+                if "429" in err_msg or "too many requests" in err_msg or "blocked" in err_msg:
+                    logger.info(f"Rate limited on API search for '{query}'. Pivoting to Browser Search...")
+                    return dispatch_tool("search_in_chrome", {"query": query})
+                
                 return _search_news_rss(query, limit=5, region="IN")
 
         elif tool_name == "search_in_chrome":
             query = params.get("query", "")
-            if not query:
-                return "No search query provided."
+            if not query: return "No search query provided."
 
-            open_status = _open_chrome_search(query)
-            # Return snippets so the assistant can also dictate useful findings.
-            summary = dispatch_tool("search_internet", {"query": query})
-            return f"{open_status}\n\n{summary}"
+            from backend import chrome_controller
+            # Use the new tolerant observant search
+            return chrome_controller.search_web_and_read(query)
+
+        elif tool_name == "read_active_tab":
+            from backend import chrome_controller
+            return chrome_controller.get_page_text(
+                max_chars=params.get("max_chars", 2000)
+            )
+
+        elif tool_name == "browser_navigate":
+            from backend import chrome_controller
+            return chrome_controller.navigate(params.get("url", ""))
+
+        elif tool_name == "browser_click":
+            from backend import chrome_controller
+            return chrome_controller.click_element(params.get("target", ""))
+
+        elif tool_name == "get_page_elements":
+            from backend import chrome_controller
+            return chrome_controller.get_interactive_elements()
+
+        elif tool_name == "browser_scroll":
+            from backend import chrome_controller
+            return chrome_controller.scroll(params.get("direction", "down"))
 
         elif tool_name == "latest_news":
             return _latest_news(
@@ -240,6 +273,10 @@ def dispatch_tool(tool_name: str, arguments: str | dict) -> str:
             if not name:
                 return "No app name provided."
 
+            # If the "app" name looks like a file path or has an extension, pivot to open_file
+            if "." in name and "\\" in name or ":" in name and "/" not in name:
+                return dispatch_tool("open_file", {"path": name})
+
             target = APP_MAP.get(name, name).strip()
 
             if not target:
@@ -252,6 +289,24 @@ def dispatch_tool(tool_name: str, arguments: str | dict) -> str:
                 return f"Opening {name}..."
             except Exception as e:
                 return f"Could not open {name}: {e}"
+
+        elif tool_name == "open_file":
+            return _open_file(params.get("path", ""))
+
+        elif tool_name == "type_text":
+            text = params.get("text", "")
+            if not text:
+                return "No text provided to type."
+            try:
+                import time
+                import pyautogui
+                # Wait 1.5s to ensure the app window (like Notepad) is focused and ready
+                time.sleep(1.5) 
+                # Human-like typing interval
+                pyautogui.typewrite(text, interval=0.03) 
+                return f"Typed successfully."
+            except Exception as e:
+                return f"Typing failed: {e}"
 
         # ── Plugin system ────────────────────────────────────────────────
         elif tool_name == "run_plugin":
@@ -486,6 +541,31 @@ def _read_file(path: str) -> str:
     
     except Exception as e:
         return f"Error reading file '{path}': {str(e)[:200]}"
+
+
+def _open_file(path: str) -> str:
+    """Open a file using its default Windows application."""
+    import os
+    if not path:
+        return "No file path provided."
+    
+    # Check Yuki_Saved first if it's a relative filename
+    if not os.path.exists(path):
+        from pathlib import Path
+        user_home = Path(os.path.expanduser("~")).resolve()
+        yuki_saved = user_home / "Documents" / "Yuki_Saved"
+        alt_path = yuki_saved / path
+        if alt_path.exists():
+            path = str(alt_path)
+    
+    if not os.path.exists(path):
+        return f"File not found: {path}"
+    
+    try:
+        os.startfile(path)
+        return f"Opened '{os.path.basename(path)}' with its default application."
+    except Exception as e:
+        return f"Failed to open file: {e}"
 
 
 

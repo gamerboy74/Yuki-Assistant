@@ -101,6 +101,15 @@ APP_MAP = {
     "google":           "https://www.google.com",
     "maps":             "https://maps.google.com",
     "calendar":         "https://calendar.google.com",
+    # Sports & News
+    "cricbuzz":         "https://www.cricbuzz.com",
+    "espncricinfo":     "https://www.espncricinfo.com",
+    "ipl":              "https://www.iplt20.com",
+    "news":             "https://news.google.com",
+    "weather":          "https://www.weather.com",
+    "amazon":           "https://www.amazon.com",
+    "twitter":          "https://www.x.com",
+    "x":                "https://www.x.com",
 }
 
 # Map of app names to process names for killing
@@ -209,7 +218,7 @@ def execute(action: dict) -> Union[str, dict, None]:
 
 def _open_app(params: dict) -> None:
     name = params.get("name", "").lower().strip()
-    exe = APP_MAP.get(name, name)  # Use map or pass through as-is
+    exe = APP_MAP.get(name, name).strip()
 
     # Direct Windows protocol support
     if "whatsapp" in name:
@@ -222,11 +231,25 @@ def _open_app(params: dict) -> None:
         os.startfile(exe)
     elif exe == "explorer" and params.get("path"):
         subprocess.Popen(["explorer", params["path"]])
-    else:
+    # Robust URL detection for domains
+    elif "." in exe and " " not in exe and "\\" not in exe:
+        if not (exe.startswith(("http://", "https://", "www.")) or "://" in exe):
+            exe = "https://" + exe
+        os.startfile(exe)
+    # Best guess for single-word web looks (e.g. "Cricbuzz" -> "cricbuzz.com")
+    elif " " not in exe and "." not in exe and not exe.startswith(("cmd", "start", "powershell")):
+        guess = f"https://www.{exe}.com"
         try:
-            subprocess.Popen(["start", "", exe], shell=True)
+            os.startfile(guess)
+            return None
         except Exception:
-            subprocess.Popen(exe, shell=True)
+            pass
+        
+    try:
+        # shell=True with 'start' is unreliable for clean paths
+        subprocess.Popen(["start", "", exe], shell=True)
+    except Exception:
+        subprocess.Popen(exe, shell=True)
     return None
 
 
@@ -276,8 +299,15 @@ def _search_web(params: dict) -> None:
 
 
 def _open_url(params: dict) -> None:
-    url = params.get("url", "")
+    url = params.get("url", "").strip()
     if url:
+        # Prepend protocol if missing for raw domains
+        if not (url.startswith(("http://", "https://", "www.")) or "://" in url):
+             if "." in url and " " not in url:
+                 url = "https://" + url
+        elif url.startswith("www."):
+            url = "https://" + url
+            
         webbrowser.open(url)
     return None
 
@@ -289,26 +319,21 @@ def _send_whatsapp(params: dict) -> Union[str, dict, None]:
     if not contact or not message:
         return "Please tell me the contact name and message."
 
+    # Strategy A: Native WhatsApp Desktop (Fastest if app is open)
     try:
         import pyautogui
         
-        # 1. Open the WhatsApp Desktop application via URI
+        # Open/Focus WhatsApp
         os.startfile("whatsapp://")
-        time.sleep(3.5) # Wait for app to launch and focus
+        time.sleep(3.5)
         
-        # 2. Trigger Search (Ctrl + F)
+        # Automation steps
         pyautogui.hotkey("ctrl", "f")
         time.sleep(0.5)
-        
-        # 3. Search for contact
         pyautogui.typewrite(contact, interval=0.05)
-        time.sleep(1.5) # Wait for list to filter
-        
-        # 4. Select the top result chat
+        time.sleep(1.5)
         pyautogui.press("enter")
         time.sleep(1.0)
-        
-        # 5. Type and send the message
         pyautogui.typewrite(message, interval=0.02)
         pyautogui.press("enter")
 
@@ -317,18 +342,22 @@ def _send_whatsapp(params: dict) -> Union[str, dict, None]:
             "ui_log": f"Sent '{message}' to '{contact}' via native WhatsApp Desktop."
         }
 
-    except ImportError:
-        logger.warning("pyautogui not installed — opening WhatsApp manually")
-        os.startfile("whatsapp://")
-        return {
-            "speak": "Maine WhatsApp open kar diya hai, please send manually.",
-            "ui_log": f"⚠️ Missing 'pyautogui' dependency.\nOpened WhatsApp Desktop. Please send your message to '{contact}' manually."
-        }
     except Exception as e:
-        logger.error(f"WhatsApp error: {e}")
+        logger.warning(f"Native WhatsApp failed: {e}. Falling back to Browser...")
+        
+        # Strategy B: WhatsApp Web via Playwright (Robust fallback)
+        from backend import chrome_controller
+        if chrome_controller._is_cdp_available() or chrome_controller._AUTO_LAUNCH:
+            result = chrome_controller.whatsapp_web_send(contact, message)
+            if "failed" not in result.lower():
+                return {
+                    "speak": f"Maine WhatsApp Web ke zariye {contact} ko message bhej diya hai.",
+                    "ui_log": result
+                }
+        
         return {
-            "speak": "Yeh message type karne mein thodi problem aa rahi hai.",
-            "ui_log": f"⚠️ WhatsApp Desktop Automation Error:\n{str(e)[:150]}"
+            "speak": "WhatsApp bhejte waqt thodi problem hui. Please manual check karein.",
+            "ui_log": f"⚠️ WhatsApp Automation Failed (Native & Web).\nError: {str(e)[:100]}"
         }
 
 def _send_whatsapp_file(params: dict) -> Union[str, dict, None]:
