@@ -15,24 +15,94 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CONFIG_PATH = os.path.join(_ROOT, "yuki.config.json")
 
+DEFAULT_CONFIG = {
+    "assistant": {
+        "name": "Yuki",
+        "wake_words": ["hey yuki", "ok yuki", "yuki"],
+        "greeting": "Hi! I'm Yuki.",
+        "idle_label": 'SAY "HEY YUKI"',
+        "tts_voice": "en-IN-NeerjaNeural",
+    },
+    "vad": {
+        "speech_threshold": 0.65
+    },
+    "whisper": {
+        "model_size": "base",
+        "silence_threshold": 300,
+        "silence_timeout": 1.2,
+        "max_record_secs": 12
+    },
+    "router": {
+        "enabled": True,
+        "fuzzy_threshold": 0.72,
+        "log_fast_path": True
+    },
+    "gemini": {
+        "model": "gemini-2.0-flash",
+        "fallback_model": "gemini-2.0-flash-lite",
+        "use_lite_fallback": True
+    },
+    "openai": {
+        "model": "gpt-4o-mini"
+    },
+    "ollama": {
+        "model": "gemma3:4b", 
+        "base_url": "http://localhost:11434"
+    },
+    "ai_correction": {
+        "model": "gemma3:4b"
+    },
+    "tts": {
+        "provider": "elevenlabs",
+        "elevenlabs_char_budget": 2000
+    }
+}
+
+def _deep_update(base: dict, update: dict) -> dict:
+    for k, v in update.items():
+        if isinstance(v, dict) and k in base and isinstance(base[k], dict):
+            _deep_update(base[k], v)
+        else:
+            base[k] = v
+    return base
+
 def _load() -> dict:
+    config = json.loads(json.dumps(DEFAULT_CONFIG)) # Deep copy defaults
+    modified = False
     try:
         with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+            user_config = json.load(f)
+            # Apply user config over defaults
+            _deep_update(config, user_config)
+            modified = True # Always rewrite to ensure full schema for UI
     except FileNotFoundError:
-        # Graceful fallback if config is missing
-        return {
-            "assistant": {
-                "name": "Yuki",
-                "wake_words": ["hey yuki", "ok yuki", "yuki"],
-                "greeting": "Hi! I'm Yuki.",
-                "idle_label": 'SAY "HEY YUKI"',
-                "tts_voice": "en-IN-NeerjaNeural",
-            },
-            "ollama":  {"model": "gemma3:4b", "base_url": "http://localhost:11434"},
-            "whisper": {"model_size": "base", "silence_threshold": 300,
-                        "silence_timeout": 1.2, "max_record_secs": 12},
-        }
+        modified = True
+        
+    if modified:
+        try:
+            with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2)
+        except Exception:
+            pass # Silently fail if can't write, will just use default RAM objects
+
+    return config
+
+def reload():
+    """Re-load the config file from disk to capture external changes (e.g. from UI)."""
+    global cfg
+    cfg = _load()
+    return cfg
+
 
 # Singleton — loaded once at import time
 cfg: dict = _load()
+
+def update_from_dict(new_cfg: dict):
+    """Update global config singleton and persist to disk."""
+    global cfg
+    _deep_update(cfg, new_cfg)
+    try:
+        with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception:
+        pass

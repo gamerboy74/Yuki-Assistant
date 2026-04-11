@@ -49,6 +49,7 @@ class YukiOrchestrator:
         self._turn_counter = 0
         self.active_mode_timeout_sec = float(os.environ.get("YUKI_ACTIVE_MODE_TIMEOUT_SEC", "8"))
         self._active_since = 0.0
+        self.loop = None
         
         # Expert Reliability: Health Tracking
         self._provider_health = {
@@ -60,7 +61,8 @@ class YukiOrchestrator:
         
         # Proactive Agent (Autonomous Health)
         def sync_speak(msg):
-            asyncio.run_coroutine_threadsafe(self._speak_alert(msg), asyncio.get_event_loop())
+            if self.loop:
+                self.loop.call_soon_threadsafe(lambda: asyncio.create_task(self._speak_alert(msg)))
         
         self.proactive = ProactiveAgent(speak_fn=sync_speak, send_fn=self._emit)
 
@@ -85,8 +87,14 @@ class YukiOrchestrator:
             msg["turn_id"] = turn_id
         self.send(msg)
 
+    def _log(self, text: str):
+        """Send a real-time event log to the dashboard."""
+        self._emit("log", text=text)
+        logger.info(f"[HUD Log] {text}")
+
     async def start(self):
         """Start the main orchestrated loop."""
+        self.loop = asyncio.get_running_loop()
         self.running = True
         logger.info("Yuki High-Performance Orchestrator started.")
         
@@ -147,6 +155,7 @@ class YukiOrchestrator:
                         self.mode = "active"
                         self._active_since = time.time()
                         self._emit("wake", text=transcript)
+                        self._log(f"Wake word detected: '{transcript}'")
 
                         inline_cmd = self._extract_inline_command(transcript)
                         if inline_cmd:
@@ -158,7 +167,7 @@ class YukiOrchestrator:
                             # Wake only: audible confirmation so user knows Yuki is listening.
                             ack = "Yes boss?"
                             self._emit("response", text=ack)
-                            await self._speak_with_interrupt(ack)
+                            await self._speak_alert(ack)
                             self._emit("listening")
                     self.audio_buffer = bytearray()
                 continue
@@ -181,6 +190,7 @@ class YukiOrchestrator:
                 confidence = self.sentinel.get_speech_confidence(chunk)
                 if confidence > 0.8: 
                     logger.info("[ORCHESTRATOR] Speech detected during playback. Interrupting...")
+                    self._log("Barge-in detected: Interrupting playback.")
                     self.stop_playback_event.set()
             
             # 2. VAD State Machine
@@ -280,6 +290,7 @@ class YukiOrchestrator:
         """Run a text transcript through the brain and TTS output."""
         if emit_transcript:
             self._emit("transcript", turn_id=turn_id, text=transcript)
+            self._log(f"Processing command: '{transcript}'")
 
         # Start parallel background synthesis and playback queues
         self.stop_playback_event.clear()
@@ -299,6 +310,7 @@ class YukiOrchestrator:
                 text = event["value"]
                 # Only queue fallback TTS if we haven't seen native audio yet
                 if not has_native_audio:
+                    self._emit("partial-response", turn_id=turn_id, text=text)
                     await self._synth_queue.put({"type": "text", "data": text})
             elif event["type"] == "tool_start":
                 self._emit("loading", turn_id=turn_id, text=f"{event['value']}...")
@@ -368,6 +380,7 @@ class YukiOrchestrator:
                                 continue
                         except Exception as e:
                             logger.warning(f"Synth failed, falling back to local: {e}")
+                            self._log("Neural TTS failed — using local voice fallback.")
                     
                     # Local Kokoro generator doesn't do files right now, 
                     # so we just push the text to be rendered inline.
@@ -490,6 +503,34 @@ class YukiOrchestrator:
                     await asyncio.sleep(0.01)
         except Exception as local_err:
             logger.error(f"Local TTS path failed: {local_err}")
+
+    def reload_config(self):
+        """Live reload system parameters from the global cfg singleton."""
+        from backend.config import cfg
+        msg = "Hot-reloading system configuration..."
+        logger.info(f"[ORCHESTRATOR] {msg}")
+        self._log(msg)
+        
+        # 1. Update Wake Words
+        new_wake = cfg.get("assistant", {}).get("wake_words", [])
+        if new_wake:
+            self.wake_detector.wake_words = new_wake
+            logger.info(f" -> Wake words updated: {new_wake}")
+            
+        # 2. Update VAD Threshold
+        new_vad = cfg.get("vad", {}).get("speech_threshold", 0.65)
+        self.sentinel.threshold = min(max(new_vad, 0.1), 0.95)
+        logger.info(f" -> VAD threshold updated: {self.sentinel.threshold:.2f}")
+
+        # 3. Update Whisper Settings if changed (model reload is more heavy)
+        new_whisper_size = cfg.get("whisper", {}).get("model_size", "base")
+        if self.stt.model_size != new_whisper_size:
+            logger.info(f" -> Whisper model change detected: {new_whisper_size}. Reloading...")
+            self.stt.model_size = new_whisper_size
+            try:
+                self.stt.reload_model()
+            except Exception as e:
+                logger.error(f"Whisper reload failed: {e}")
 
     def stop(self):
         """Standard shutdown procedure."""

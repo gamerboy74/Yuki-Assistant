@@ -8,11 +8,10 @@
     ],
     "greeting": "Hey! I'm Yuki. Ask me anything, or say \"Hey Yuki\" to activate voice mode.",
     "idle_label": "SAY \"HEY YUKI\"",
-    "tts_voice": "en-IN-NeerjaNeural"
+    "tts_voice": "en-US-AvaMultilingualNeural"
   },
-  "ollama": {
-    "model": "gemma3:4b",
-    "base_url": "http://localhost:11434"
+  "vad": {
+    "speech_threshold": 0.65
   },
   "whisper": {
     "model_size": "base",
@@ -29,5 +28,34 @@
     "model": "gemini-2.0-flash",
     "fallback_model": "gemini-2.5-flash-lite",
     "use_lite_fallback": true
-  }
+  },
+  "openai": {
+    "model": "gpt-4o-mini"
+  },
+  "ollama": {
+    "model": "gemma3:4b",
+    "base_url": "http://localhost:11434"
+  },
+  "ai_correction": {
+    "model": "gemma3:4b"
+  },
+  "tts": {
+    "provider": "elevenlabs",
+    "elevenlabs_char_budget": 2000,
+    "gain_db": 1,
+    "spatial_audio": false,
+    "resampling_hq": true
+  },
+  "brain": {
+    "provider": "openai"
+  },
+  "name": "Yuki",
+  "wakeWords": [
+    "hey yuki",
+    "ok yuki",
+    "yuki"
+  ],
+  "greeting": "Hey! I'm Yuki. Ask me anything, or say \"Hey Yuki\" to activate voice mode.",
+  "idleLabel": "SAY \"HEY YUKI\"",
+  "ttsVoice": "en-US-AvaMultilingualNeural"
 }

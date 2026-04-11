@@ -25,8 +25,8 @@ ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "")
 def _get_edge_voice():
     return os.environ.get("TTS_VOICE") or cfg["assistant"].get("tts_voice", "en-IN-NeerjaNeural")
 
-# Safety: skip ElevenLabs for very long strings to avoid burning credits
-ELEVENLABS_CHAR_BUDGET = int(os.environ.get("ELEVENLABS_CHAR_BUDGET", "300"))
+def _get_elevenlabs_budget():
+    return int(os.environ.get("ELEVENLABS_CHAR_BUDGET") or cfg.get("tts", {}).get("elevenlabs_char_budget", 2000))
 
 # Shared lock — prevents overlapping TTS playback
 _speak_lock = threading.Lock()
@@ -49,7 +49,7 @@ _last_playback_time = 0.0  # Unix timestamp of last audio completion
 def stop_speech():
     """Interrupt and stop current audio playback immediately (Barge-in)."""
     _playback_stop_event.set()
-    if _pygame_initialized and pygame.mixer.music.get_busy():
+    if _mixer_ready and pygame.mixer.music.get_busy():
         try:
             pygame.mixer.music.stop()
         except:
@@ -115,9 +115,10 @@ def _speak_elevenlabs(text: str, tmp_path: str) -> bool:
         return False
 
     # ── Char-budget guard — avoid burning credits on long strings ──
-    if len(text) > ELEVENLABS_CHAR_BUDGET:
+    budget = _get_elevenlabs_budget()
+    if len(text) > budget:
         logger.warning(
-            f"ElevenLabs skipped: text length {len(text)} > budget {ELEVENLABS_CHAR_BUDGET}. "
+            f"ElevenLabs skipped: text length {len(text)} > budget {budget}. "
             "Falling back to edge-tts. Raise ELEVENLABS_CHAR_BUDGET env var to override."
         )
         return False
@@ -214,7 +215,9 @@ async def synthesize_to_file_async(text: str) -> str | None:
     tmp_path = os.path.join(tempfile.gettempdir(), f"yuki_tts_{uuid.uuid4().hex}.mp3")
 
     audio_ready = False
-    if ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID:
+    provider = cfg.get("tts", {}).get("provider", "elevenlabs").lower()
+
+    if provider == "elevenlabs" and ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID:
         loop = asyncio.get_event_loop()
         audio_ready = await loop.run_in_executor(None, _speak_elevenlabs, text, tmp_path)
 
@@ -248,6 +251,31 @@ async def _speak_async(text: str) -> None:
         except Exception:
             pass
 
+
+# ── Voice Listing ─────────────────────────────────────────────────────────────
+
+async def get_voices_async():
+    """Retrieve list of available Microsoft Neural voices."""
+    try:
+        import edge_tts
+        voices = await edge_tts.VoicesManager.create()
+        # Filter for English voices by default, but let's send them all categorized
+        # We'll just send a curated list to avoid overwhelming the IPC
+        v_list = voices.find(Locale="en-US") + voices.find(Locale="en-GB") + voices.find(Locale="en-IN")
+        
+        return [
+            {
+                "id": v["ShortName"],
+                "name": v["FriendlyName"].split("-")[1].strip() if "-" in v["FriendlyName"] else v["FriendlyName"],
+                "gender": v["Gender"],
+                "locale": v["Locale"],
+                "provider": "edge-tts"
+            }
+            for v in v_list
+        ]
+    except Exception as e:
+        logger.error(f"Failed to list voices: {e}")
+        return []
 
 # ── Public API ────────────────────────────────────────────────────────────────
 

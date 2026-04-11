@@ -43,3 +43,17 @@ torchaudio>=2.2.0
 soundfile>=0.12.0
 numpy>=1.24.0
 pytest>=8.0.0
+
+# ── Recently Added / Extracted Sub-system Dependencies ────────────────────────
+requests>=2.31.0               # ElevenLabs TTS, Weather, and general APIs
+Pillow>=10.0.0                 # Image processing for Vision Plugin
+pycaw>=20230407                # Windows Audio Volume Management
+keyboard>=0.13.5               # Low-level media and hotkey controller
+pywinauto>=0.6.8               # Native Windows UI manipulation
+pywhatkit>=5.4                 # WhatsApp Web fallback sending
+selenium>=4.15.0               # Chrome / web automation
+webdriver-manager>=4.0.0       # Auto-downloader for Selenium Chrome Drivers
+python-docx>=1.1.0             # Document text parsing
+python-pptx>=0.6.23            # Presentation text parsing
+pdfplumber>=0.10.3             # Robust PDF text and table extraction
+vosk>=0.3.45                   # Offline fallback generic speech recognition

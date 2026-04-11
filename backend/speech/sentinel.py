@@ -18,13 +18,18 @@ class VoiceSentinel:
     def __init__(self, sample_rate: int = 16000, threshold: float = 0.65):
         self.sample_rate = sample_rate
         env_threshold = os.environ.get("VAD_SPEECH_THRESHOLD")
+        
+        from backend.config import cfg
+        cfg_threshold = cfg.get("vad", {}).get("speech_threshold", threshold)
+        
         if env_threshold is not None:
             try:
-                threshold = float(env_threshold)
+                cfg_threshold = float(env_threshold)
             except ValueError:
-                logger.warning(f"Invalid VAD_SPEECH_THRESHOLD='{env_threshold}', using default {threshold}")
+                logger.warning(f"Invalid VAD_SPEECH_THRESHOLD='{env_threshold}', using default {cfg_threshold}")
+                
         # Clamp for safety: too low catches TV/background, too high misses user speech.
-        self.threshold = min(max(threshold, 0.1), 0.95)
+        self.threshold = min(max(cfg_threshold, 0.1), 0.95)
         self.model = None
         self.utils = None
         self._load_model()

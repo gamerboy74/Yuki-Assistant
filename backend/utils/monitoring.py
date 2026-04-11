@@ -1,5 +1,6 @@
 import psutil
 import time
+from backend.config import cfg
 
 def get_system_stats():
     """Returns a dictionary of current system performance metrics."""
@@ -19,6 +20,11 @@ def get_system_stats():
         # Network (sent/recv bytes since last call)
         net = psutil.net_io_counters()
         
+        # Metadata
+        ai_model = cfg.get("gemini", {}).get("model", "Unknown")
+        if cfg.get("ollama", {}).get("enabled"):
+             ai_model = f"Ollama ({cfg['ollama']['model']})"
+             
         return {
             "cpu": cpu_usage,
             "ram": ram_usage,
@@ -30,6 +36,7 @@ def get_system_stats():
                 "sent": net.bytes_sent,
                 "recv": net.bytes_recv
             },
+            "ai_model": ai_model,
             "timestamp": time.time()
         }
     except Exception as e:

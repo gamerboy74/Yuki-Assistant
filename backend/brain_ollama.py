@@ -18,6 +18,10 @@ Improvements vs v1:
 import json
 import os
 import re
+import time
+import logging
+import urllib.request
+from typing import AsyncGenerator
 import datetime
 import urllib.request
 import urllib.error
@@ -121,6 +125,39 @@ def is_available() -> bool:
     except Exception as e:
         logger.warning(f"Ollama availability check failed: {e}")
         return False
+
+
+async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
+    """
+    Async generator wrapper for Gemma/Ollama.
+    Simulates streaming by splitting the full response into sentences.
+    """
+    import asyncio
+    
+    # Run the synchronous 'process' in a separate thread to avoid blocking the event loop
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, process, transcript)
+    
+    response_text = result.get("response", "")
+    action = result.get("action", {"type": "none", "params": {}})
+    
+    # If there is a tool action, yield it correctly
+    if action and action.get("type") != "none":
+        yield {"type": "tool_start", "value": action["type"]}
+        # In a real streaming scenario, we'd execute the tool here, 
+        # but the orchestrator handles tool execution via the 'action' dict in the final response.
+        # For Ollama, we yield the end immediately since the 'process' call already finished.
+        yield {"type": "tool_end", "value": action["type"]}
+
+    if response_text:
+        # Split into sentences for the TTS/HUD stream
+        sentences = re.split(r'(?<=[.!?])\s+', response_text)
+        for sentence in sentences:
+            if sentence.strip():
+                yield {"type": "text_sentence", "value": sentence.strip()}
+                await asyncio.sleep(0.05) # Tiny delay for UI feel
+
+    yield {"type": "final_response", "value": response_text or "", "action": action}
 
 
 def process(transcript: str) -> dict:

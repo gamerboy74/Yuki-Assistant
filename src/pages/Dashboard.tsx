@@ -2,10 +2,36 @@ import { useEffect, useState } from 'react';
 
 interface DashboardProps {
   stats: any;
+  logs: {id: string, text: string, ts: Date}[];
 }
 
-export default function Dashboard({ stats }: DashboardProps) {
+export default function Dashboard({ stats, logs }: DashboardProps) {
   const [time, setTime] = useState(new Date());
+
+  const weather = stats?.weather;
+
+  const getWeatherIcon = (code: number) => {
+    if (code === 0) return 'sunny';
+    if (code <= 3) return 'partly_cloudy_day';
+    if (code <= 48) return 'foggy';
+    if (code <= 55) return 'rainy_light';
+    if (code <= 65) return 'rainy';
+    if (code <= 75) return 'ac_unit';
+    if (code <= 82) return 'thunderstorm';
+    return 'thunderstorm';
+  };
+
+  const getWeatherDesc = (code: number) => {
+    if (code === 0) return 'Clear Sky';
+    if (code === 1) return 'Mainly Clear';
+    if (code === 2) return 'Partly Cloudy';
+    if (code === 3) return 'Overcast';
+    if (code <= 48) return 'Foggy';
+    if (code <= 55) return 'Drizzle';
+    if (code <= 65) return 'Rain';
+    if (code <= 75) return 'Snow';
+    return 'Stormy';
+  };
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
@@ -21,7 +47,7 @@ export default function Dashboard({ stats }: DashboardProps) {
   };
 
   return (
-    <div className="h-full w-full p-8 overflow-y-auto subtle-scrollbar animate-fade-in relative z-10">
+    <div className="h-full w-full p-8 overflow-y-auto subtle-scrollbar animate-fade-in relative z-10 bg-transparent">
       
       {/* Header section */}
       <header className="mb-10 flex justify-between items-end">
@@ -97,29 +123,35 @@ export default function Dashboard({ stats }: DashboardProps) {
           </div>
         </div>
 
-        {/* Weather Widget (Mock) */}
+        {/* Weather Widget (Dynamic) */}
         <div className="glass-card p-6 flex flex-col items-center justify-center text-center overflow-hidden relative">
            {/* Decorative background circle */}
            <div className="absolute -top-10 -right-10 w-32 h-32 bg-primary/10 rounded-full blur-3xl pointer-events-none" />
            
-           <span className="material-symbols-outlined text-5xl text-primary mb-4 animate-pulse-slow" style={{ fontVariationSettings: "'FILL' 1" }}>
-             cloud_queue
+           <span className="material-symbols-outlined text-5xl text-primary mb-4 animate-fade-in" style={{ fontVariationSettings: "'FILL' 1" }}>
+             {weather ? getWeatherIcon(weather.condition_code) : 'cloud_queue'}
            </span>
-           <div className="text-4xl font-light text-on-surface mb-1">24°C</div>
-           <div className="text-on-surface-variant font-label tracking-widest text-[10px] uppercase mb-4">Partly Cloudy · London</div>
+           <div className="text-4xl font-light text-on-surface mb-1">
+             {weather ? `${Math.round(weather.temp)}°C` : '--°C'}
+           </div>
+           <div className="text-on-surface-variant font-label tracking-widest text-[10px] uppercase mb-4">
+             {weather 
+               ? `${getWeatherDesc(weather.condition_code)} · ${weather.city}` 
+               : 'Locating System...'}
+           </div>
            
            <div className="flex gap-4 w-full pt-4 border-t border-outline-variant/10">
              <div className="flex-1">
                <div className="text-[10px] text-on-surface-variant/40 uppercase mb-1">Wind</div>
-               <div className="text-xs">12 km/h</div>
+               <div className="text-xs">{weather ? `${weather.wind} km/h` : '--'}</div>
              </div>
              <div className="flex-1">
                <div className="text-[10px] text-on-surface-variant/40 uppercase mb-1">Humidity</div>
-               <div className="text-xs">64%</div>
+               <div className="text-xs">{weather ? `${weather.humidity}%` : '--'}</div>
              </div>
              <div className="flex-1">
                <div className="text-[10px] text-on-surface-variant/40 uppercase mb-1">UV</div>
-               <div className="text-xs">Low</div>
+               <div className="text-xs">{weather ? (weather.uv > 5 ? 'High' : 'Low') : '--'}</div>
              </div>
            </div>
         </div>
@@ -141,26 +173,48 @@ export default function Dashboard({ stats }: DashboardProps) {
 
           <div className="flex items-center justify-between py-2 border-b border-outline-variant/10">
              <span className="text-xs text-on-surface-variant">LLM Backend</span>
-             <span className="text-xs text-on-surface">GPT-4o (Online)</span>
+             <span className="text-xs text-on-surface font-mono">{stats?.ai_model || 'GPT-4o (Online)'}</span>
+          </div>
+
+          <div className="flex items-center justify-between py-2 border-b border-outline-variant/10">
+             <span className="text-xs text-on-surface-variant">Signal Traffic</span>
+             <div className="flex gap-3 text-[10px] font-mono">
+                <span className="text-primary" title="Total Bytes Sent">↑ {(stats?.network?.sent / 1024 / 1024 || 0).toFixed(1)}MB</span>
+                <span className="text-secondary" title="Total Bytes Received">↓ {(stats?.network?.recv / 1024 / 1024 || 0).toFixed(1)}MB</span>
+             </div>
           </div>
 
           <div className="mt-2 text-[10px] text-on-surface-variant/40 uppercase tracking-widest mb-2">Recent Events</div>
-          <div className="space-y-3">
-             <div className="flex gap-3 items-start">
-               <div className="w-1 h-1 rounded-full bg-primary mt-1.5" />
-               <p className="text-[11px] text-on-surface/70 leading-relaxed">System initialized successfully.</p>
-             </div>
-             <div className="flex gap-3 items-start">
-               <div className="w-1 h-1 rounded-full bg-primary mt-1.5" />
-               <p className="text-[11px] text-on-surface/70 leading-relaxed">Voice recognition engine standby.</p>
-             </div>
+          <div className="space-y-3 max-h-[140px] overflow-y-auto subtle-scrollbar pr-1">
+             {logs.length > 0 ? logs.map(log => (
+               <div key={log.id} className="flex gap-3 items-start animate-fade-in">
+                 <div className="w-1 h-1 rounded-full bg-primary mt-1.5 shrink-0" />
+                 <div className="flex flex-col gap-0.5">
+                   <p className="text-[11px] text-on-surface/80 leading-tight">{log.text}</p>
+                   <span className="text-[8px] text-on-surface-variant/40 font-mono">
+                     {log.ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                   </span>
+                 </div>
+               </div>
+             )) : (
+               <>
+                 <div className="flex gap-3 items-start opacity-40">
+                   <div className="w-1 h-1 rounded-full bg-primary mt-1.5" />
+                   <p className="text-[11px] text-on-surface/70 leading-relaxed">System initialized successfully.</p>
+                 </div>
+                 <div className="flex gap-3 items-start opacity-40">
+                   <div className="w-1 h-1 rounded-full bg-primary mt-1.5" />
+                   <p className="text-[11px] text-on-surface/70 leading-relaxed">Voice recognition engine standby.</p>
+                 </div>
+               </>
+             )}
           </div>
         </div>
 
       </div>
 
-      {/* Visual background element */}
-      <div className="fixed bottom-0 right-0 w-[500px] h-[500px] bg-primary/2 rounded-full blur-[120px] pointer-events-none -z-10 translate-x-1/2 translate-y-1/2" />
+      {/* Visual background element - kept for additional depth */}
+      <div className="fixed bottom-0 right-0 w-[500px] h-[500px] bg-primary/5 rounded-full blur-[120px] pointer-events-none -z-10 translate-x-1/2 translate-y-1/2" />
     </div>
   );
 }

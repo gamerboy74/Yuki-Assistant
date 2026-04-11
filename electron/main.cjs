@@ -286,6 +286,45 @@ ipcMain.on('yuki:save-history', (event, messages) => {
   }
 });
 
+ipcMain.on('yuki:save-settings', (event, payload) => {
+  try {
+    const fs = require('fs');
+    const configPath = path.join(__dirname, '..', 'yuki.config.json');
+    
+    // 1. Persist to disk
+    fs.writeFileSync(configPath, JSON.stringify(payload, null, 2), 'utf-8');
+    console.log('[Yuki] Settings persisted to disk.');
+    
+    // 2. Notify Python backend to reload config in memory
+    sendToPython({ type: 'save_settings', value: payload });
+  } catch (e) {
+    console.error('Failed to save settings:', e);
+  }
+});
+
+ipcMain.on('yuki:command', (event, cmd) => {
+  console.log('[Yuki Renderer → COMMAND]', cmd);
+  sendToPython(cmd);
+});
+
+ipcMain.on('yuki:purge-memory', () => {
+  console.log('[Yuki] Purging memory vault...');
+  sendToPython({ type: 'purge_memory' });
+});
+
+ipcMain.handle('yuki:get-settings', async () => {
+  try {
+    const fs = require('fs');
+    const configPath = path.join(__dirname, '..', 'yuki.config.json');
+    if (fs.existsSync(configPath)) {
+      return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    }
+  } catch (e) {
+    console.error('Failed to get settings:', e);
+  }
+  return null;
+});
+
 // ── App Lifecycle ──────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
   // Setup auto-start at login (only applies to built app, not dev mode usually, but harmless to set)

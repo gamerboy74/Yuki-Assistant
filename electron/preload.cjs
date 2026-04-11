@@ -36,7 +36,12 @@ contextBridge.exposeInMainWorld('yukiAPI', {
   },
 
   // Remove state listener on cleanup
-
   removeStateListener: () => ipcRenderer.removeAllListeners('yuki:state'),
+
+  // Settings & Memory
+  saveSettings: (payload) => ipcRenderer.send('yuki:save-settings', payload),
+  getSettings:  () => ipcRenderer.invoke('yuki:get-settings'),
+  purgeMemory:  () => ipcRenderer.send('yuki:purge-memory'),
+  sendCommand:  (cmd)     => ipcRenderer.send('yuki:command', cmd),
 });
 

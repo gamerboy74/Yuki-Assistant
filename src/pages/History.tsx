@@ -58,7 +58,7 @@ export default function History({ messages }: HistoryProps) {
   }
 
   return (
-    <div className="absolute inset-0 overflow-y-auto px-8 md:px-12 pt-12 pb-32 subtle-scrollbar">
+    <div className="absolute inset-0 overflow-y-auto px-8 md:px-12 pt-12 pb-32 subtle-scrollbar bg-transparent">
       <header className="mb-16 max-w-5xl">
         <h1 className="font-headline text-5xl tracking-tight text-on-surface mb-4">
           Activity <span className="text-primary">Timeline</span>

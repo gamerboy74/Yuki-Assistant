@@ -13,11 +13,12 @@ import json
 import os
 import urllib.request
 from backend.utils.logger import get_logger
+from backend.config import cfg
 
 logger = get_logger(__name__)
 
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL", "gemma3:4b")
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL") or cfg.get("ollama", {}).get("base_url", "http://localhost:11434")
+OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL") or cfg.get("ai_correction", {}).get("model", "gemma3:4b")
 
 _CORRECTION_PROMPT = """\
 You are a speech recognition post-processor for a Windows voice assistant called Yuki.

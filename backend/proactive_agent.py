@@ -163,8 +163,8 @@ class ProactiveAgent:
         logger.info(f"[PROACTIVE] Firing alert: {alert_type}")
 
         # Announce visually in UI
-        self._send({"type": "speaking"})
-        self._send({"type": "response", "text": f"⚠️ {message}"})
+        self._send("speaking")
+        self._send("response", text=f"⚠️ {message}")
 
         # Speak it out loud
         try:
@@ -172,4 +172,4 @@ class ProactiveAgent:
         except Exception as e:
             logger.error(f"[PROACTIVE] TTS error on alert: {e}")
 
-        self._send({"type": "idle"})
+        self._send("idle")

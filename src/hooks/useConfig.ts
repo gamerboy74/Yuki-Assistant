@@ -15,6 +15,9 @@ export interface AssistantConfig {
   greeting:  string;
   idleLabel: string;
   ttsVoice:  string;
+  brain: {
+    provider: string;
+  };
 }
 
 export function useConfig(): AssistantConfig {
@@ -25,6 +28,9 @@ export function useConfig(): AssistantConfig {
     greeting:  a.greeting,
     idleLabel: a.idle_label,
     ttsVoice:  a.tts_voice,
+    brain: {
+      provider: (config as any).brain?.provider || 'gemini'
+    }
   };
 }
 

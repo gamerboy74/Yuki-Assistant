@@ -25,11 +25,12 @@ from backend.brain.shared import (
     get_openai_messages,
 )
 from backend.brain.tools import get_tools_for_query
+from backend.config import cfg
 
 logger = get_logger(__name__)
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL") or cfg.get("openai", {}).get("model", "gpt-4o-mini")
 
 MAX_AGENT_STEPS = 5  # Down from 8 — 5 is sufficient for complex tasks
 

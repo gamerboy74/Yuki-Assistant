@@ -3,7 +3,10 @@
 @tailwind utilities;
 
 @layer base {
-  html, body, #root {
+
+  html,
+  body,
+  #root {
     @apply w-full h-full overflow-hidden;
   }
 
@@ -16,17 +19,35 @@
 }
 
 @layer utilities {
+
   /* Electron window drag regions */
-  .drag-region     { -webkit-app-region: drag; }
-  .no-drag-region  { -webkit-app-region: no-drag; }
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+
+  .no-drag-region {
+    -webkit-app-region: no-drag;
+  }
 
   /* Scrollbar: hidden */
-  .hide-scrollbar::-webkit-scrollbar { display: none; }
-  .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
 
   /* Scrollbar: subtle */
-  .subtle-scrollbar::-webkit-scrollbar       { width: 4px; }
-  .subtle-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .subtle-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .subtle-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
   .subtle-scrollbar::-webkit-scrollbar-thumb {
     background: rgba(143, 245, 255, 0.12);
     border-radius: 999px;
@@ -42,6 +63,7 @@
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
     transition: all 0.3s ease-out;
   }
+
   .glass-card:hover {
     border-color: rgba(143, 245, 255, 0.15);
     background: rgba(30, 33, 38, 0.5);
@@ -78,73 +100,223 @@
   }
 
   /* Timing function utility */
-  .ease-out-expo { transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+  .ease-out-expo {
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
 }
 
 /* ── Animations ─────────────────────────────────────────────────────────── */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
+
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Waveform bar — animates height from bottom up */
 @keyframes visualizerBar {
-  0%   { transform: scaleY(0.2); }
-  50%  { transform: scaleY(1);   }
-  100% { transform: scaleY(0.2); }
+  0% {
+    transform: scaleY(0.2);
+  }
+
+  50% {
+    transform: scaleY(1);
+  }
+
+  100% {
+    transform: scaleY(0.2);
+  }
 }
 
 /* Orb idle breathing */
 @keyframes orbBreath {
-  0%, 100% { transform: scale(1); opacity: 0.9; }
-  50%       { transform: scale(1.03); opacity: 1; }
+
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+
+  50% {
+    transform: scale(1.03);
+    opacity: 1;
+  }
 }
 
 /* Spin for processing ring */
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Ripple for listening rings */
 @keyframes ripple {
-  0%   { transform: scale(1);    opacity: 0.6; }
-  100% { transform: scale(1.4);  opacity: 0;   }
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
 }
 
 /* Very slow pulse for ambient elements */
 @keyframes pulseSlow {
-  0%, 100% { opacity: 0.8; transform: scale(1); }
-  50%      { opacity: 1;   transform: scale(1.05); }
+
+  0%,
+  100% {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
 }
 
 /* Floating effect for background items */
 @keyframes float {
-  0%, 100% { transform: translateY(0) rotate(0); }
-  50%      { transform: translateY(-20px) rotate(2deg); }
+
+  0%,
+  100% {
+    transform: translateY(0) rotate(0);
+  }
+
+  50% {
+    transform: translateY(-20px) rotate(2deg);
+  }
 }
 
-.animate-fade-in  { animation: fadeIn  0.4s ease-out both; }
-.animate-slide-up { animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
-.animate-breath   { animation: orbBreath 3s ease-in-out infinite; }
-.animate-ripple   { animation: ripple 1.5s ease-out infinite; }
-.animate-pulse-slow { animation: pulseSlow 4s ease-in-out infinite; }
-.animate-float    { animation: float 10s ease-in-out infinite; }
-
-.viz-bar          { transform-origin: bottom; animation: visualizerBar 1.2s ease-in-out infinite; }
-
-/* Custom range slider */
-input[type="range"] { -webkit-appearance: none; background: transparent; }
-input[type="range"]::-webkit-slider-runnable-track {
-  background: #1d2024; height: 4px; border-radius: 2px;
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out both;
 }
+
+.animate-slide-up {
+  animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-breath {
+  animation: orbBreath 3s ease-in-out infinite;
+}
+
+.animate-ripple {
+  animation: ripple 1.5s ease-out infinite;
+}
+
+.animate-pulse-slow {
+  animation: pulseSlow 4s ease-in-out infinite;
+}
+
+.animate-float {
+  animation: float 10s ease-in-out infinite;
+}
+
+.viz-bar {
+  transform-origin: bottom;
+  animation: visualizerBar 1.2s ease-in-out infinite;
+}
+
+/* Custom range slider (YUKI.SYS) */
+input[type="range"] {
+  -webkit-appearance: none;
+  background: transparent;
+}
+
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
-  height: 16px; width: 16px; border-radius: 50%;
-  background: #8ff5ff; margin-top: -6px; cursor: pointer;
-  box-shadow: 0 0 10px rgba(143, 245, 255, 0.4);
+  height: 16px;
+  width: 16px;
+  background: var(--color-primary, #cc97ff);
+  cursor: pointer;
+  border-radius: 0;
+  margin-top: -6px;
+}
+
+/* ── Cosmic Animations ─────────────────────────────────────────────────── */
+@keyframes nebulaDrift1 {
+  0% {
+    transform: scale(1) translate(0, 0);
+  }
+
+  100% {
+    transform: scale(1.08) translate(2%, 1.5%);
+  }
+}
+
+@keyframes nebulaDrift2 {
+  0% {
+    transform: scale(1.05) translate(0, 0);
+  }
+
+  100% {
+    transform: scale(0.97) translate(-1.5%, 2%);
+  }
+}
+
+@keyframes starTwinkle {
+
+  0%,
+  100% {
+    opacity: var(--min-op);
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: var(--max-op);
+    transform: scale(1.4);
+  }
+}
+
+@keyframes shootStar {
+  0% {
+    opacity: 0;
+    transform: rotate(-30deg) translateX(0);
+  }
+
+  5% {
+    opacity: 0.7;
+  }
+
+  30% {
+    opacity: 0;
+    transform: rotate(-30deg) translateX(120px);
+  }
+
+  100% {
+    opacity: 0;
+    transform: rotate(-30deg) translateX(120px);
+  }
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 4px;
+  cursor: pointer;
+  background: #23262d;
+  border-radius: 0;
 }

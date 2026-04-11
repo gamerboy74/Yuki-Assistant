@@ -93,6 +93,14 @@ APP_MAP = {
     "camera":           "microsoft.windows.camera:",
     "paint":            "mspaint",
     "3d paint":         "ms-paint:",
+    # Web Apps (Redirect to URLs)
+    "youtube":          "https://www.youtube.com",
+    "gmail":            "https://mail.google.com",
+    "github":           "https://www.github.com",
+    "chatgpt":          "https://chat.openai.com",
+    "google":           "https://www.google.com",
+    "maps":             "https://maps.google.com",
+    "calendar":         "https://calendar.google.com",
 }
 
 # Map of app names to process names for killing

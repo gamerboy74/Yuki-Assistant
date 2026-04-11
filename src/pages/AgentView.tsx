@@ -1,128 +1,248 @@
-/**
- * AgentView.tsx — Yuki Voice Agent Interface
- *
- * Layout: Full-screen orb-centered voice experience.
- * The orb IS the agent — it breathes, listens, pulses, speaks.
- * Chat is secondary, revealed below.
- */
-
-import { useRef, useEffect, useState, useCallback, memo } from 'react';
+import { useRef, useEffect, useState, useCallback, memo, useMemo } from 'react';
 import type { OrbState, ChatMessage } from '../App';
-
-/* ── Sub-components for performance ───────────────────────────────────────── */
-
-const MessageThread = memo(({ messages, colorPrimary, orbState }: { messages: ChatMessage[], colorPrimary: string, orbState: OrbState }) => {
-  return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      {messages.map((msg) => (
-        <div
-          key={msg.id}
-          className={`flex flex-col gap-1 animate-fade-in ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
-        >
-          {msg.role === 'user' ? (
-            <div className="max-w-[75%] px-4 py-2.5 rounded-2xl rounded-br-sm bg-surface-container-high text-on-surface text-sm font-light">
-              {msg.text}
-            </div>
-          ) : (
-            <div className="max-w-[75%] flex gap-2.5 items-start">
-              <div
-                className="w-1.5 h-1.5 rounded-full mt-2 flex-shrink-0"
-                style={{ background: colorPrimary }}
-              />
-              <p className="text-on-surface text-sm font-light leading-relaxed">
-                {msg.text}
-              </p>
-            </div>
-          )}
-        </div>
-      ))}
-
-      {/* Processing dots in chat */}
-      {orbState === 'processing' && (
-        <div className="flex items-start gap-2.5 animate-fade-in">
-          <div className="w-1.5 h-1.5 rounded-full mt-2.5 opacity-50" style={{ background: colorPrimary }} />
-          <div className="flex gap-1.5 items-center pt-1">
-            {[0, 150, 300].map(delay => (
-              <div
-                key={delay}
-                className="w-2 h-2 rounded-full animate-bounce"
-                style={{ background: colorPrimary, opacity: 0.6, animationDelay: `${delay}ms` }}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-});
+import energySphere from '../assets/energy-sphere.png';
 
 interface AgentViewProps {
-  viewMode:        'chat' | 'voice';
-  orbState:        OrbState;
-  statusLabel:     string;
-  transcription:   string;
-  messages:        ChatMessage[];
-  clarifyQuestion: string;
-  clarifyOptions:  string[];
-  isHotListening:  boolean;
-  onTrigger:       () => void;
-  onSendMessage:   (text: string) => void;
-  onChoice:        (choice: string) => void;
+  viewMode: 'chat' | 'voice';
+  orbState: OrbState;
+  statusLabel: string;
+  transcription: string;
+  messages: ChatMessage[];
+  clarifyQuestion?: string;
+  clarifyOptions?: string[];
+  isHotListening?: boolean;
+  onTrigger: () => void;
+  onSendMessage: (text: string) => void;
+  onChoice: (choice: string) => void;
+  selectedProvider?: string;
+  onProviderChange?: (p: string) => void;
 }
 
-/* ── State → visual config ───────────────────────────────────────────────── */
-const STATE_CONFIG = {
+const PROVIDER_CONFIG: Record<string, { label: string, color: string, icon: string }> = {
+  gemini: { label: 'Gemini Link', color: '#8ff5ff', icon: 'flare' },
+  openai: { label: 'OpenAI Link', color: '#10a37f', icon: 'psychology' },
+  ollama: { label: 'Local Link', color: '#d946ef', icon: 'hub' },
+};
+
+/* ── State config ─────────────────────────────────────────────────────────── */
+
+const STATE = {
   idle: {
-    ring1: 'scale-100 opacity-20',
-    ring2: 'scale-100 opacity-10',
-    ring3: 'scale-100 opacity-[0.05]',
-    glow:  'opacity-20',
-    orb:   'scale-100',
-    shadow: '0 0 60px rgba(143,245,255,0.08)',
-    label:  'opacity-40',
+    label: 'YUKI.SYS',
+    iconColor: '#8ff5ff',
+    ringColor: 'rgba(143,245,255,0.18)',
+    glow: 'rgba(143,245,255,0.06)',
+    orbClass: 'orb-idle',
+    ringClass: 'ring-idle',
   },
   listening: {
-    ring1: 'scale-110 opacity-60',
-    ring2: 'scale-125 opacity-40',
-    ring3: 'scale-150 opacity-20',
-    glow:  'opacity-60',
-    orb:   'scale-105',
-    shadow: '0 0 120px rgba(143,245,255,0.35)',
-    label:  'opacity-100',
+    label: 'LISTENING',
+    iconColor: '#8ff5ff',
+    ringColor: 'rgba(143,245,255,0.35)',
+    glow: 'rgba(143,245,255,0.14)',
+    orbClass: 'orb-listening',
+    ringClass: 'ring-listening',
   },
   processing: {
-    ring1: 'scale-105 opacity-30',
-    ring2: 'scale-115 opacity-20',
-    ring3: 'scale-130 opacity-10',
-    glow:  'opacity-30',
-    orb:   'scale-100',
-    shadow: '0 0 80px rgba(251,191,36,0.25)',
-    label:  'opacity-100',
+    label: 'PROCESSING',
+    iconColor: '#fbbf24',
+    ringColor: 'rgba(251,191,36,0.30)',
+    glow: 'rgba(251,191,36,0.10)',
+    orbClass: 'orb-processing',
+    ringClass: 'ring-processing',
   },
   speaking: {
-    ring1: 'scale-115 opacity-70',
-    ring2: 'scale-130 opacity-50',
-    ring3: 'scale-155 opacity-25',
-    glow:  'opacity-70',
-    orb:   'scale-108',
-    shadow: '0 0 140px rgba(52,211,153,0.35)',
-    label:  'opacity-100',
+    label: 'RESPONDING',
+    iconColor: '#ff32c8',
+    ringColor: 'rgba(255,50,200,0.35)',
+    glow: 'rgba(255,50,200,0.12)',
+    orbClass: 'orb-speaking',
+    ringClass: 'ring-speaking',
   },
-} as const;
+} satisfies Record<OrbState, { label: string; iconColor: string; ringColor: string; glow: string; orbClass: string; ringClass: string }>;
 
-const STATE_COLORS = {
-  idle:       { primary: '#8ff5ff', bg: 'rgba(143,245,255,0.03)' },
-  listening:  { primary: '#8ff5ff', bg: 'rgba(143,245,255,0.12)' },
-  processing: { primary: '#fbbf24', bg: 'rgba(251,191,36,0.08)'  },
-  speaking:   { primary: '#34d399', bg: 'rgba(52,211,153,0.10)'  },
-};
-
-const ICON_MAP = {
-  idle:       'graphic_eq',
-  listening:  'mic',
+const ICON_MAP: Record<OrbState, string> = {
+  idle: 'graphic_eq',
+  listening: 'mic',
   processing: 'cognition',
-  speaking:   'volume_up',
+  speaking: 'volume_up',
 };
+
+/* ── Message Thread ───────────────────────────────────────────────────────── */
+const MessageThread = memo(({
+  messages,
+  iconColor,
+  orbState,
+}: {
+  messages: ChatMessage[];
+  iconColor: string;
+  orbState: OrbState;
+}) => (
+  <div className="max-w-3xl mx-auto space-y-8 pb-10">
+    {messages.map((msg, idx) => (
+      <div
+        key={msg.id}
+        className={`flex flex-col gap-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+        style={{ animation: `msgIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) both ${idx * 0.05}s` }}
+      >
+        {/* HUD Metadata Header */}
+        <div className={`flex items-center gap-3 px-1 opacity-40 font-mono text-[9px] tracking-widest uppercase
+          ${msg.role === 'user' ? 'flex-row-reverse text-right' : 'text-left'}`}>
+          <span className="font-bold">{msg.role === 'user' ? 'Local User' : 'Neural Core'}</span>
+          <span>//</span>
+          <span>{msg.role === 'user' ? 'Protocol: Manual' : 'Protocol: Synthetic'}</span>
+          <span>//</span>
+          <span>{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+        </div>
+
+        {/* Message Segment */}
+        <div
+          className={`relative max-w-[85%] px-5 py-4 rounded-sm transition-all duration-500
+            ${msg.role === 'user'
+              ? 'bg-white/[0.03] border-r-2 border-white/20 text-white/90 shadow-sm'
+              : 'bg-primary/5 border-l-2 border-primary/40 text-white shadow-[0_0_20px_rgba(143,245,255,0.03)]'
+            }`}
+        >
+          <p className="leading-relaxed whitespace-pre-wrap text-sm font-light tracking-wide">{msg.text}</p>
+          
+          {/* Decorative Corner (Assistant only) */}
+          {msg.role === 'assistant' && (
+            <div className="absolute top-0 right-0 w-2 h-2 border-t border-r border-primary/30" />
+          )}
+        </div>
+      </div>
+    ))}
+
+    {orbState === 'processing' && (
+      <div className="flex flex-col gap-2 items-start" style={{ animation: 'msgIn 0.4s ease both' }}>
+        <div className="flex items-center gap-3 px-1 opacity-20 font-mono text-[9px] tracking-widest uppercase">
+          <span className="font-bold">Neural Core</span>
+          <span>//</span>
+          <span className="animate-pulse">Decoding Stream...</span>
+        </div>
+        <div className="flex gap-1.5 p-4 bg-primary/5 border-l-2 border-primary/10 rounded-sm">
+          <div className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-pulse" />
+          <div className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-pulse [animation-delay:0.2s]" />
+          <div className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-pulse [animation-delay:0.4s]" />
+        </div>
+      </div>
+    )}
+  </div>
+));
+
+/* ── Energy Orb ───────────────────────────────────────────────────────────── */
+
+function EnergyOrb({
+  orbState,
+  isHotListening,
+  onTrigger,
+}: {
+  orbState: OrbState;
+  isHotListening?: boolean;
+  onTrigger: () => void;
+}) {
+  const s = STATE[orbState];
+
+  return (
+    <div className="relative flex items-center justify-center select-none" style={{ width: 280, height: 280 }}>
+
+      {/* ── Ambient background glow ── */}
+      <div
+        className="absolute inset-0 rounded-full blur-3xl transition-all duration-1000"
+        style={{ background: s.glow, transform: 'scale(1.6)' }}
+      />
+
+      {/* ── Ripple rings (state-driven) ── */}
+      <div className={`absolute inset-0 rounded-full border-2 transition-all duration-700 ${s.ringClass}`}
+        style={{ borderColor: s.ringColor }} />
+      <div className={`absolute rounded-full border transition-all duration-700 ${s.ringClass}`}
+        style={{ inset: -20, borderColor: s.ringColor, opacity: 0.5 }} />
+      <div className={`absolute rounded-full border transition-all duration-700 ${s.ringClass}`}
+        style={{ inset: -44, borderColor: s.ringColor, opacity: 0.2 }} />
+
+      {/* ── THE ORB BUTTON ── */}
+      <button
+        onClick={onTrigger}
+        aria-label={`Voice agent — ${orbState}`}
+        className={`relative z-10 rounded-full overflow-hidden focus:outline-none active:scale-95 transition-transform duration-200 ${s.orbClass}`}
+        style={{ width: 220, height: 220 }}
+      >
+        {/* PNG energy sphere base */}
+        <img
+          src={energySphere}
+          alt=""
+          aria-hidden="true"
+          className="absolute inset-0 w-full h-full object-cover rounded-full pointer-events-none orb-img"
+          draggable={false}
+        />
+
+        {/* State-specific overlay blends */}
+        <div className="absolute inset-0 rounded-full orb-overlay pointer-events-none" />
+
+        {/* Scan-line texture for depth */}
+        <div
+          className="absolute inset-0 rounded-full pointer-events-none opacity-[0.04]"
+          style={{
+            backgroundImage: 'repeating-linear-gradient(0deg, #fff 0px, #fff 1px, transparent 1px, transparent 3px)',
+          }}
+        />
+
+        {/* Glass center icon pill */}
+        <div
+          className="absolute inset-0 flex items-center justify-center pointer-events-none"
+        >
+          <div
+            className="w-16 h-16 rounded-full flex items-center justify-center"
+            style={{
+              background: 'rgba(0,0,0,0.45)',
+              backdropFilter: 'blur(12px)',
+              border: '1px solid rgba(255,255,255,0.15)',
+              boxShadow: `0 0 30px ${s.iconColor}40`,
+            }}
+          >
+            <span
+              className="material-symbols-outlined text-3xl"
+              style={{
+                color: isHotListening ? '#8ff5ff' : s.iconColor,
+                fontVariationSettings: "'FILL' 1",
+                filter: `drop-shadow(0 0 8px ${s.iconColor})`,
+              }}
+            >
+              {ICON_MAP[orbState]}
+            </span>
+          </div>
+        </div>
+      </button>
+
+      {/* ── Outer decorative arc ── */}
+      <svg
+        className="absolute pointer-events-none"
+        style={{ inset: -60, width: 'calc(100% + 120px)', height: 'calc(100% + 120px)' }}
+        viewBox="0 0 400 400"
+      >
+        <circle
+          cx="200" cy="200" r="185"
+          fill="none"
+          stroke={s.ringColor}
+          strokeWidth="0.5"
+          strokeDasharray="6 18"
+          className="arc-rotate"
+        />
+        <circle
+          cx="200" cy="200" r="196"
+          fill="none"
+          stroke={s.ringColor}
+          strokeWidth="0.3"
+          strokeDasharray="2 30"
+          className="arc-reverse"
+          opacity="0.5"
+        />
+      </svg>
+    </div>
+  );
+}
+
+/* ── Main Component ───────────────────────────────────────────────────────── */
 
 export default function AgentView({
   viewMode,
@@ -131,286 +251,142 @@ export default function AgentView({
   transcription,
   messages,
   clarifyQuestion,
-  clarifyOptions,
+  clarifyOptions = [],
   isHotListening,
   onTrigger,
   onSendMessage,
   onChoice,
+  selectedProvider = 'gemini',
+  onProviderChange,
 }: AgentViewProps) {
-  const [inputText,    setInputText]    = useState('');
-  const [showChat,     setShowChat]     = useState(true);
-  const [lastResponse, setLastResponse] = useState('');
-  const [greeting,     setGreeting]     = useState('Hello');
+  const [inputText, setInputText] = useState('');
+  const [showChat, setShowChat] = useState(viewMode === 'chat');
+  const [showBrainMenu, setShowBrainMenu] = useState(false);
+  const [greeting, setGreeting] = useState('Hello');
   const threadRef = useRef<HTMLDivElement>(null);
 
-  // Sync showChat with viewMode when it changes
-  useEffect(() => {
-    setShowChat(viewMode === 'chat');
-  }, [viewMode]);
+  const activeProvider = PROVIDER_CONFIG[selectedProvider] || PROVIDER_CONFIG.gemini;
 
-  // Time-based greeting
   useEffect(() => {
-    const hour = new Date().getHours();
-    if (hour < 12) setGreeting('Good morning');
-    else if (hour < 18) setGreeting('Good afternoon');
-    else setGreeting('Good evening');
+    const h = new Date().getHours();
+    setGreeting(h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening');
   }, []);
 
-  const color   = STATE_COLORS[orbState];
-  const cfg     = STATE_CONFIG[orbState];
-  const isActive = orbState !== 'idle';
-
-  // Track last assistant message for the main display – keep it visible even after finish speaking
-  useEffect(() => {
-    const last = [...messages].reverse().find(m => m.role === 'assistant');
-    if (last) {
-      setLastResponse(last.text);
-    }
-  }, [messages]);
-
-  // Reset display when a new interaction begins (listening)
-  useEffect(() => {
-    if (orbState === 'listening') {
-      setLastResponse('');
-    }
-  }, [orbState]);
-
-  // Auto-scroll chat
   useEffect(() => {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, orbState]);
 
   const handleSend = useCallback(() => {
-    const text = inputText.trim();
-    if (!text) return;
-    onSendMessage(text);
+    if (!inputText.trim()) return;
+    onSendMessage(inputText);
     setInputText('');
-    setShowChat(true);
   }, [inputText, onSendMessage]);
 
-  const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
-  };
-
-  // Number of visualizer bars to render (more when speaking)
-  const BAR_COUNT = orbState === 'speaking' ? 40 : orbState === 'listening' ? 32 : 20;
+  const s = STATE[orbState];
 
   return (
-    <div
-      className="relative flex flex-col h-full overflow-hidden"
-      style={{ background: '#0c0e11' }}
-    >
+    <div className="relative flex flex-col h-full overflow-hidden bg-transparent text-white selection:bg-cyan-500/30">
 
-      {/* ── Full-page ambient background glow ─────────────────────────────── */}
-      <div
-        className="absolute inset-0 pointer-events-none transition-all duration-1000"
-        style={{
-          background: `radial-gradient(ellipse 70% 60% at 50% 50%, ${color.bg} 0%, transparent 70%)`,
-        }}
+      {/* Local state-reactive nebula (adds depth atop global drift) */}
+      <div className="absolute inset-0 pointer-events-none transition-all duration-1000"
+        style={{ background: `radial-gradient(ellipse 65% 50% at 50% 55%, ${s.glow}, transparent 70%)` }}
       />
 
-      {/* ── Dot-grid texture ──────────────────────────────────────────────── */}
-      <div className="absolute inset-0 pointer-events-none dot-grid opacity-[0.025]" />
+      {/* ── Neural Link Selector HUD ── */}
+      <div className="absolute top-10 right-10 z-[60]">
+        <div className="relative">
+          <button
+            onClick={() => setShowBrainMenu(!showBrainMenu)}
+            className="flex items-center gap-3 bg-black/40 border border-white/5 pr-5 pl-3 py-2 rounded-full backdrop-blur-xl hover:bg-white/5 hover:border-white/20 transition-all select-none group"
+            title="Switch Neural Link"
+          >
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-500`}
+              style={{ background: `${activeProvider.color}15`, border: `1px solid ${activeProvider.color}30`, boxShadow: `0 0 15px ${activeProvider.color}20` }}>
+              <span className="material-symbols-outlined text-[18px] animate-pulse" style={{ color: activeProvider.color }}>
+                {activeProvider.icon}
+              </span>
+            </div>
+            <div className="text-left">
+              <div className="text-[8px] uppercase tracking-[0.2em] text-white/40 font-bold">Neural Link</div>
+              <div className="text-[10px] font-mono tracking-wider opacity-80" style={{ color: activeProvider.color }}>
+                {activeProvider.label.toUpperCase()}
+              </div>
+            </div>
+            <span className={`material-symbols-outlined text-white/20 text-[16px] transition-transform duration-300 ${showBrainMenu ? 'rotate-180' : ''}`}>
+              expand_more
+            </span>
+          </button>
 
-      {/* ── Ambient Floating Particles ──────────────────────────────────────  */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        {Array.from({ length: 12 }).map((_, i) => (
-          <div
-            key={i}
-            className="absolute rounded-full bg-primary/10 animate-float blur-sm"
-            style={{
-              width: Math.random() * 4 + 2,
-              height: Math.random() * 4 + 2,
-              left: `${Math.random() * 100}%`,
-              top: `${Math.random() * 100}%`,
-              animationDelay: `${Math.random() * 5}s`,
-              animationDuration: `${Math.random() * 10 + 10}s`,
-            }}
-          />
-        ))}
+          {/* Brain Menu Overlay */}
+          {showBrainMenu && (
+            <div className="absolute top-full mt-3 right-0 w-64 bg-black/80 border border-white/10 rounded-xl backdrop-blur-3xl shadow-2xl p-2 animate-msgIn overflow-hidden">
+              <div className="px-3 py-2 mb-1 border-b border-white/5">
+                <div className="text-[8px] uppercase tracking-[0.3em] text-white/20 font-bold">Available Synapses</div>
+              </div>
+              {Object.entries(PROVIDER_CONFIG).map(([key, cfg]) => (
+                <button
+                  key={key}
+                  onClick={() => {
+                    onProviderChange?.(key);
+                    setShowBrainMenu(false);
+                  }}
+                  className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all group/item
+                    ${selectedProvider === key ? 'bg-white/5 border border-white/10' : 'hover:bg-white/[0.03] border border-transparent'}`}
+                >
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center border border-white/5" 
+                    style={{ background: selectedProvider === key ? `${cfg.color}15` : 'transparent' }}>
+                    <span className="material-symbols-outlined text-[18px]" style={{ color: selectedProvider === key ? cfg.color : 'rgba(255,255,255,0.2)' }}>
+                      {cfg.icon}
+                    </span>
+                  </div>
+                  <div className="text-left flex-1">
+                    <div className="text-xs font-medium" style={{ color: selectedProvider === key ? 'white' : 'rgba(255,255,255,0.4)' }}>{cfg.label}</div>
+                    <div className="text-[9px] opacity-40 uppercase tracking-tighter">
+                      {key === 'ollama' ? 'Local Neural Link' : 'Cloud Neural Link'}
+                    </div>
+                  </div>
+                  {selectedProvider === key && (
+                    <div className="w-1.5 h-1.5 rounded-full" style={{ background: cfg.color, boxShadow: `0 0 10px ${cfg.color}` }} />
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* ══ MAIN ORB ZONE ═════════════════════════════════════════════════  */}
-      <div
-        className={`flex-1 flex flex-col items-center justify-center transition-all duration-700 ease-out-expo ${
-          viewMode === 'chat' ? 'pt-2 pb-2' : (showChat ? 'pt-4' : 'pt-0')
-        }`}
-        style={{ 
-          minHeight: viewMode === 'chat' ? '180px' : (showChat ? '45%' : '65%'),
-          maxHeight: viewMode === 'chat' ? '240px' : 'none'
-        }}
-      >
+      {/* ── Orb Zone ── */}
+      <div className={`flex-1 flex flex-col items-center justify-center transition-all duration-700 ease-out ${showChat ? 'pt-4' : 'pt-0'}`}>
 
-        {/* ── Outer decorative rings ───────────────────────────────────────  */}
-        <div className="relative flex items-center justify-center">
+        <EnergyOrb orbState={orbState} isHotListening={isHotListening} onTrigger={onTrigger} />
 
-          {/* Ring 3 — outermost */}
-          <div
-            className={`absolute rounded-full border border-current transition-all duration-1000 ease-out`}
-            style={{
-              width: viewMode === 'chat' ? 240 : 380, 
-              height: viewMode === 'chat' ? 240 : 380,
-              color: color.primary,
-              opacity: 0,
-              ...(orbState === 'listening'  && { opacity: 0.08, transform: 'scale(1.05)' }),
-              ...(orbState === 'speaking'   && { opacity: 0.12, transform: 'scale(1.08)' }),
-            }}
-          />
-
-          {/* Ring 2 */}
-          <div
-            className="absolute rounded-full border transition-all duration-700 ease-out"
-            style={{
-              width: viewMode === 'chat' ? 180 : 300, 
-              height: viewMode === 'chat' ? 180 : 300,
-              borderColor: color.primary,
-              opacity: isActive ? 0.18 : 0.06,
-              transform: isActive ? 'scale(1.04)' : 'scale(1)',
-            }}
-          />
-
-          {/* Ring 1 — innermost ring */}
-          <div
-            className="absolute rounded-full border-2 transition-all duration-500 ease-out"
-            style={{
-              width: viewMode === 'chat' ? 140 : 234, 
-              height: viewMode === 'chat' ? 140 : 234,
-              borderColor: color.primary,
-              opacity: isActive ? 0.45 : 0.12,
-              transform: isActive ? 'scale(1.02)' : 'scale(1)',
-            }}
-          />
-
-          {/* ── The Orb ────────────────────────────────────────────────────  */}
-          <button
-            onClick={onTrigger}
-            className="relative rounded-full flex items-center justify-center cursor-pointer transition-all duration-500 focus:outline-none group overflow-hidden"
-            style={{
-              width: viewMode === 'chat' ? 100 : 208, // Adjusted from 208 (52*4) to 100
-              height: viewMode === 'chat' ? 100 : 208,
-              background: `radial-gradient(circle at 35% 35%, ${color.primary}22 0%, ${color.primary}08 50%, transparent 70%)`,
-              border: `1px solid ${color.primary}30`,
-              boxShadow: isActive
-                ? `0 0 80px ${color.primary}30, 0 0 160px ${color.primary}15, inset 0 0 60px ${color.primary}08`
-                : `0 0 40px ${color.primary}10, inset 0 0 30px ${color.primary}04`,
-              backdropFilter: 'blur(20px)',
-              transform: isActive ? 'scale(1.04)' : 'scale(1)',
-            }}
-            aria-label="Activate Yuki"
+        {/* Status */}
+        <div className="mt-10 text-center pointer-events-none" style={{ animation: 'fadeUp 0.6s ease both' }}>
+          <p className="text-[9px] uppercase tracking-[0.6em] text-white/25 mb-2 font-bold">Protocol Yuki</p>
+          <h2
+            className="text-xs font-light tracking-[0.35em] uppercase transition-all duration-500"
+            style={{ color: isHotListening ? '#8ff5ff' : s.iconColor }}
           >
-            {/* Inner fluid glow */}
-            <div
-              className="absolute inset-4 rounded-full transition-all duration-700"
-              style={{
-                background: `radial-gradient(circle at 40% 40%, ${color.primary}18 0%, transparent 60%)`,
-                filter: 'blur(8px)',
-              }}
-            />
-
-            {/* Processing spin ring */}
-            {orbState === 'processing' && (
-              <div
-                className="absolute inset-6 rounded-full"
-                style={{
-                  border: `1.5px solid transparent`,
-                  borderTopColor: color.primary,
-                  borderRightColor: `${color.primary}50`,
-                  animation: 'spin 1.5s linear infinite',
-                }}
-              />
-            )}
-
-            {/* Icon */}
-            <span
-              className="relative z-10 material-symbols-outlined transition-all duration-300"
-              style={{
-                fontSize: viewMode === 'chat' ? 32 : 52,
-                color: color.primary,
-                fontVariationSettings: "'FILL' 1",
-                filter: `drop-shadow(0 0 12px ${color.primary}90)`,
-              }}
-            >
-              {ICON_MAP[orbState]}
-            </span>
-
-            {/* Hover ring */}
-            <div
-              className="absolute inset-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-              style={{ boxShadow: `0 0 0 2px ${color.primary}40` }}
-            />
-          </button>
-        </div>
-
-        {/* ── Waveform visualizer bars ──────────────────────────────────────  */}
-        {viewMode !== 'chat' && (
-          <div
-            className="flex items-end justify-center mt-10 transition-all duration-500 gap-[3px]"
-            style={{
-              height: 52,
-              opacity: isActive ? 1 : 0.2,
-            }}
-          >
-          {Array.from({ length: BAR_COUNT }).map((_, i) => {
-            const center   = BAR_COUNT / 2;
-            const dist     = Math.abs(i - center) / center;
-            const baseH    = orbState === 'speaking'
-              ? (1 - dist * 0.5) * 44 + Math.random() * 8
-              : orbState === 'listening'
-              ? (1 - dist * 0.6) * 36 + Math.random() * 10
-              : 6 + (1 - dist) * 10;
-            const delay    = (i / BAR_COUNT) * 1.2;
-            const duration = 0.6 + Math.random() * 0.6;
-
-            return (
-              <div
-                key={i}
-                className="rounded-full flex-shrink-0"
-                style={{
-                  width: 3,
-                  minHeight: 4,
-                  height: `${Math.max(4, baseH)}px`,
-                  background: color.primary,
-                  opacity: isActive ? 0.4 + (1 - dist) * 0.6 : 0.3,
-                  animation: isActive
-                    ? `visualizerBar ${duration}s ease-in-out ${delay}s infinite alternate`
-                    : 'none',
-                  boxShadow: (i === Math.floor(center) || i === Math.ceil(center)) && isActive
-                    ? `0 0 8px ${color.primary}`
-                    : 'none',
-                }}
-              />
-            );
-          })}
-        </div>
-        )}
-
-        {/* ── Status label ─────────────────────────────────────────────────  */}
-        <div
-          className={`${viewMode === 'chat' ? 'mt-2' : 'mt-6'} font-label text-xs tracking-[0.25em] uppercase transition-all duration-500`}
-          style={{ color: isHotListening ? '#8ff5ff' : color.primary, opacity: isActive || isHotListening ? 1 : 0.35 }}
-        >
-          {isHotListening ? 'READY FOR MORE...' : orbState === 'idle' ? `${greeting}, Boss` : statusLabel}
-        </div>
-
-        {/* Spoken/transcript overlays intentionally hidden for a cleaner orb view. */}
-
-        {/* ── Clarification buttons ─────────────────────────────────────────  */}
-        {clarifyQuestion && clarifyOptions.length > 0 && (
-          <div className="mt-8 flex flex-col items-center gap-3 animate-slide-up px-12 max-w-lg w-full">
-            <p className="text-on-surface-variant text-sm tracking-wide text-center">
-              {clarifyQuestion}
+            {isHotListening ? 'Ready for input…' : orbState === 'idle' ? `${greeting}, boss` : statusLabel}
+          </h2>
+          {transcription && (
+            <p className="mt-4 text-[11px] font-mono text-white/35 max-w-xs mx-auto animate-pulse">
+              &gt; {transcription}
             </p>
+          )}
+        </div>
+
+        {/* Clarify choices */}
+        {clarifyQuestion && (
+          <div className="mt-8 flex flex-col items-center gap-4 px-6 max-w-md" style={{ animation: 'fadeUp 0.4s ease both' }}>
+            <p className="text-gray-400 text-xs text-center leading-relaxed italic">"{clarifyQuestion}"</p>
             <div className="flex flex-wrap justify-center gap-2">
               {clarifyOptions.map((opt, i) => (
                 <button
                   key={i}
                   onClick={() => onChoice(opt)}
-                  className="px-4 py-2 rounded-full text-xs font-semibold border transition-all duration-200 hover:scale-105"
-                  style={{
-                    borderColor: `${color.primary}40`,
-                    color: color.primary,
-                    background: `${color.primary}0a`,
-                  }}
+                  className="px-4 py-1.5 rounded-full text-[11px] font-medium border border-white/10 bg-white/5 hover:bg-white/10 transition-all active:scale-95"
+                  style={{ color: s.iconColor }}
                 >
                   {opt}
                 </button>
@@ -418,104 +394,233 @@ export default function AgentView({
             </div>
           </div>
         )}
-
-        {/* ── Show chat toggle ──────────────────────────────────────────────  */}
-        <button
-          onClick={() => setShowChat(v => !v)}
-          className="mt-8 flex items-center gap-2 text-on-surface-variant/40 hover:text-on-surface-variant/70 transition-colors text-xs tracking-widest uppercase font-label"
-        >
-          <span className="material-symbols-outlined text-sm">
-            {showChat ? 'expand_less' : 'chat_bubble'}
-          </span>
-          {showChat ? 'Hide chat' : 'Show chat'}
-        </button>
       </div>
 
-      {/* ══ CHAT LOG (secondary, collapsible) ═════════════════════════════  */}
+      {/* ── Chat Thread ── */}
       {showChat && (
         <div
           ref={threadRef}
-          className={`flex-1 overflow-y-auto px-8 pt-4 pb-28 subtle-scrollbar border-t border-outline-variant/10 animate-slide-up bg-black/20`}
-          style={{ maxHeight: viewMode === 'chat' ? 'none' : '45%' }}
+          className="flex-[0.7] overflow-y-auto px-6 pb-36 pt-4 border-t border-white/5 bg-black/40 backdrop-blur-xl"
+          style={{ animation: 'slideUp 0.4s cubic-bezier(0.2,0.8,0.2,1) both' }}
         >
-          <MessageThread messages={messages} colorPrimary={color.primary} orbState={orbState} />
+          <MessageThread messages={messages} iconColor={s.iconColor} orbState={orbState} />
         </div>
       )}
 
-      {/* ══ INPUT BAR (always visible at bottom) ══════════════════════════  */}
-      <div className="absolute bottom-0 left-0 right-0 px-8 pb-6 pt-12 bg-gradient-to-t from-background via-background/95 to-transparent pointer-events-none z-20">
-        <div className="max-w-xl mx-auto pointer-events-auto">
-          <div className="relative group">
-            {/* Hover glow */}
-            <div
-              className="absolute -inset-0.5 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500 blur-sm"
-              style={{ background: `${color.primary}20` }}
-            />
-            {/* Input pill */}
-            <div
-              className="relative flex items-center px-5 py-3 rounded-full gap-3 transition-all duration-300"
-              style={{
-                background: 'rgba(17,20,23,0.8)',
-                border: `1px solid ${isActive ? color.primary + '40' : 'rgba(70,72,75,0.4)'}`,
-                backdropFilter: 'blur(20px)',
-                boxShadow: isActive ? `0 0 20px ${color.primary}15` : 'none',
-              }}
-            >
-              <span
-                className="material-symbols-outlined text-lg flex-shrink-0 transition-colors duration-300"
-                style={{ color: isActive ? color.primary : 'rgba(170,171,175,0.5)' }}
-              >
-                auto_awesome
-              </span>
+      {/* ── Neural Terminal Input ── */}
+      <div className="absolute bottom-0 inset-x-0 p-8 pt-20 bg-gradient-to-t from-black via-black/90 to-transparent pointer-events-none z-50">
+        <div className="max-w-2xl mx-auto pointer-events-auto">
+          
+          {/* Terminal Command Prompt Label */}
+          <div className="flex items-center gap-2 mb-2 px-4 opacity-50">
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: activeProvider.color }} />
+            <span className="text-[9px] font-mono tracking-[0.2em] uppercase text-white/40">Status: Online // Link: {activeProvider.label} // Cycle: {orbState.toUpperCase()}</span>
+          </div>
 
-              <input
-                type="text"
-                value={inputText}
-                onChange={e => setInputText(e.target.value)}
-                onKeyDown={handleKey}
-                placeholder={isActive ? statusLabel.toLowerCase() + '...' : 'Type something to Yuki...'}
-                className="flex-1 bg-transparent outline-none border-none text-on-surface text-sm font-light placeholder:text-on-surface-variant/30 min-w-0"
-              />
-
-              {/* Send button */}
-              {inputText && (
-                <button
-                  onClick={handleSend}
-                  className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200 hover:scale-110"
-                  style={{
-                    background: `${color.primary}20`,
-                    border: `1px solid ${color.primary}50`,
-                  }}
-                >
-                  <span className="material-symbols-outlined text-sm" style={{ color: color.primary }}>
-                    arrow_upward
-                  </span>
-                </button>
-              )}
-
-              {/* Mic button */}
-              {!inputText && (
-                <button
-                  onClick={onTrigger}
-                  className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300 ${isActive ? 'animate-pulse' : 'hover:scale-110'}`}
-                  style={{
-                    background: isActive ? `${color.primary}30` : `${color.primary}15`,
-                    border: `1px solid ${color.primary}40`,
-                  }}
-                >
-                  <span
-                    className="material-symbols-outlined text-sm"
-                    style={{ color: color.primary, fontVariationSettings: "'FILL' 1" }}
-                  >
-                    mic
-                  </span>
-                </button>
-              )}
+          <div className={`relative flex items-center gap-3 bg-black/60 border border-white/10 p-3 pl-6 rounded-lg backdrop-blur-3xl shadow-[0_0_50px_rgba(0,0,0,0.5)] transition-all duration-500 group
+              ${orbState === 'processing' ? 'border-primary/40 shadow-[0_0_20px_rgba(143,245,255,0.1)]' : 'hover:border-white/20'}`}
+          >
+            {/* Terminal Prompt Indicator */}
+            <div className="flex items-center gap-1.5 group-hover:gap-2 transition-all">
+              <span className="text-primary font-mono text-sm font-bold opacity-70 select-none">&gt;_</span>
+              
+              {/* Neural Waveform Visualizer */}
+              <div className="flex items-center gap-[2px] h-3 px-1">
+                {[...Array(5)].map((_, i) => (
+                  <div
+                    key={i}
+                    className={`w-[2px] rounded-full transition-all duration-300
+                      ${orbState === 'listening' ? 'animate-wave-active' : orbState === 'processing' ? 'animate-wave-thinking' : 'h-1 opacity-20'}`}
+                    style={{ 
+                      background: activeProvider.color,
+                      animationDelay: `${i * 0.1}s`,
+                      height: orbState === 'listening' ? '12px' : orbState === 'processing' ? '8px' : '4px'
+                    }}
+                  />
+                ))}
+              </div>
             </div>
+            
+            <input
+              className="flex-1 bg-transparent border-none outline-none text-sm font-mono placeholder:text-white/10 text-white selection:bg-primary/30"
+              placeholder="Awaiting command..."
+              value={inputText}
+              onChange={e => setInputText(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSend()}
+            />
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowChat(v => !v)}
+                className="p-2 rounded-md text-white/20 hover:text-primary hover:bg-white/5 transition-all"
+                title={showChat ? 'Deactivate HUD Overlay' : 'Activate HUD Overlay'}
+              >
+                <span className="material-symbols-outlined text-[20px]">
+                  {showChat ? 'layers_clear' : 'terminal'}
+                </span>
+              </button>
+
+              <button
+                onClick={handleSend}
+                disabled={!inputText.trim()}
+                className="w-10 h-10 rounded-md flex items-center justify-center transition-all bg-primary/10 border border-primary/20 text-primary hover:bg-primary hover:text-black active:scale-95 disabled:opacity-5 disabled:grayscale"
+              >
+                <span className="material-symbols-outlined font-bold text-[20px]">play_arrow</span>
+              </button>
+            </div>
+
+            {/* Subtle Inner Glow */}
+            <div className="absolute inset-0 rounded-lg pointer-events-none border border-white/[0.03]" />
           </div>
         </div>
       </div>
 
+      {/* ── All Styles ── */}
+      <style>{`
+        /* ── Orb base image ── */
+        .orb-img {
+          transition: filter 0.8s ease, transform 0.8s ease;
+        }
+
+        /* ── IDLE: gentle breathe + slow drift ── */
+        .orb-idle .orb-img {
+          animation: orbBreath 5s ease-in-out infinite;
+          filter: brightness(0.75) saturate(1.1);
+        }
+        .orb-idle .orb-overlay {
+          background: radial-gradient(circle at 50% 50%, rgba(143,245,255,0.05) 0%, transparent 70%);
+          animation: none;
+        }
+        .ring-idle {
+          animation: ringIdle 6s ease-in-out infinite;
+          opacity: 0.25;
+        }
+
+        @keyframes orbBreath {
+          0%,100% { transform: scale(1);    filter: brightness(0.75) saturate(1.1); }
+          50%      { transform: scale(1.04); filter: brightness(0.85) saturate(1.2); }
+        }
+        @keyframes ringIdle {
+          0%,100% { transform: scale(1);    opacity: 0.25; }
+          50%      { transform: scale(1.04); opacity: 0.40; }
+        }
+
+        /* ── LISTENING: fast pulse + ripple rings ── */
+        .orb-listening .orb-img {
+          animation: orbListen 1.4s ease-in-out infinite;
+          filter: brightness(1) saturate(1.4);
+        }
+        .orb-listening .orb-overlay {
+          background: radial-gradient(circle at 50% 50%, rgba(143,245,255,0.12) 0%, transparent 65%);
+          animation: overlayListen 1.4s ease-in-out infinite;
+        }
+        .ring-listening {
+          animation: ringRipple 1.2s ease-out infinite;
+        }
+
+        @keyframes orbListen {
+          0%,100% { transform: scale(1);    filter: brightness(1) saturate(1.4); }
+          50%      { transform: scale(1.06); filter: brightness(1.15) saturate(1.6); }
+        }
+        @keyframes overlayListen {
+          0%,100% { opacity: 0.7; }
+          50%      { opacity: 1;   }
+        }
+        @keyframes ringRipple {
+          0%   { transform: scale(1);    opacity: 0.8; }
+          100% { transform: scale(1.18); opacity: 0;   }
+        }
+
+        /* ── PROCESSING: spin + hue-rotate ── */
+        .orb-processing .orb-img {
+          animation: orbProcess 2s linear infinite;
+          filter: brightness(1) saturate(1.3) hue-rotate(0deg);
+        }
+        .orb-processing .orb-overlay {
+          background: conic-gradient(from 0deg, rgba(251,191,36,0.18) 0%, transparent 50%, rgba(251,191,36,0.18) 100%);
+          animation: overlaySpin 2s linear infinite;
+        }
+        .ring-processing {
+          animation: ringProcess 1s ease-in-out infinite;
+        }
+
+        @keyframes orbProcess {
+          0%   { filter: brightness(1) saturate(1.3) hue-rotate(0deg);   transform: scale(1);    }
+          50%  { filter: brightness(1.1) saturate(1.5) hue-rotate(20deg); transform: scale(1.03); }
+          100% { filter: brightness(1) saturate(1.3) hue-rotate(0deg);   transform: scale(1);    }
+        }
+        @keyframes overlaySpin {
+          from { transform: rotate(0deg);   }
+          to   { transform: rotate(360deg); }
+        }
+        @keyframes ringProcess {
+          0%,100% { transform: scale(1);    opacity: 0.6; }
+          50%      { transform: scale(1.08); opacity: 0.9; }
+        }
+
+        /* ── SPEAKING: throb + magenta shimmer ── */
+        .orb-speaking .orb-img {
+          animation: orbSpeak 0.7s ease-in-out infinite;
+          filter: brightness(1.1) saturate(1.6);
+        }
+        .orb-speaking .orb-overlay {
+          background: radial-gradient(circle at 45% 45%, rgba(255,50,200,0.22) 0%, transparent 60%);
+          animation: overlaySpeak 0.7s ease-in-out infinite;
+        }
+        .ring-speaking {
+          animation: ringSpeak 0.7s ease-in-out infinite;
+        }
+
+        @keyframes orbSpeak {
+          0%,100% { transform: scale(1);    filter: brightness(1.1) saturate(1.6); }
+          40%      { transform: scale(1.07); filter: brightness(1.25) saturate(1.9); }
+          70%      { transform: scale(1.04); filter: brightness(1.15) saturate(1.7); }
+        }
+        @keyframes overlaySpeak {
+          0%,100% { opacity: 0.8; }
+          50%      { opacity: 1;   }
+        }
+        @keyframes ringSpeak {
+          0%,100% { transform: scale(1);    opacity: 0.9; }
+          50%      { transform: scale(1.10); opacity: 0.5; }
+        }
+
+        /* ── Decorative arcs ── */
+        .arc-rotate  { animation: arcSpin 20s linear infinite; transform-origin: center; transform-box: fill-box; }
+        .arc-reverse { animation: arcSpin 30s linear infinite reverse; transform-origin: center; transform-box: fill-box; }
+        @keyframes arcSpin {
+          from { transform: rotate(0deg);   }
+          to   { transform: rotate(360deg); }
+        }
+
+        /* ── UI transitions ── */
+        @keyframes fadeUp  { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes msgIn   { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar       { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+
+        /* Neural Waveform Animations */
+        @keyframes waveActive {
+          0%, 100% { height: 4px; opacity: 0.3; }
+          50% { height: 12px; opacity: 1; }
+        }
+        .animate-wave-active {
+          animation: waveActive 0.6s ease-in-out infinite;
+        }
+
+        @keyframes waveThinking {
+          0%, 100% { opacity: 0.2; transform: scaleY(1); }
+          50% { opacity: 0.8; transform: scaleY(1.5); }
+        }
+        .animate-wave-thinking {
+          animation: waveThinking 1s ease-in-out infinite;
+        }
+      `}</style>
     </div>
   );
 }

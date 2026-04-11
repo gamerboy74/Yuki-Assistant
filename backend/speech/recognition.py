@@ -136,6 +136,13 @@ class AsyncWhisperStreamer:
             logger.error(f"Whisper initialization failed: {e}")
             raise
 
+    def reload_model(self):
+        """Force reload of the whisper model (e.g. if model size changed)."""
+        import gc
+        self.model = None
+        gc.collect()
+        self._load_model()
+
     async def transcribe_bytes(self, audio_data: bytes) -> str:
         """
         Transcribe a block of 16kHz mono PCM bytes in-memory.
