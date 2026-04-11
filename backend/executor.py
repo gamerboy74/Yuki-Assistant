@@ -138,24 +138,31 @@ KILL_MAP = {
 }
 
 
-def execute(action: dict) -> Union[str, dict, None]:
+def execute(action: dict, send_fn=None) -> Union[str, dict, None]:
     """
     Execute an action returned by the brain.
     Returns an optional override response string, or None.
 
     action format: {"type": "action_name", "params": {...}}
+    send_fn: optional callable(dict) for IPC — uses print fallback if None.
     """
     atype = action.get("type", "none")
     params = action.get("params", {})
 
     logger.info(f"Executing: {atype} | params: {params}")
 
+    def _send(msg: dict):
+        if send_fn:
+            send_fn(msg)
+        else:
+            import json
+            try:
+                print(json.dumps(msg), flush=True)
+            except Exception:
+                pass
+
     if atype != "none":
-        import json
-        try:
-            print(json.dumps({"type": "loading", "text": f"RUNNING {atype.upper().replace('_', ' ')}..."}), flush=True)
-        except Exception:
-            pass
+        _send({"type": "loading", "text": f"RUNNING {atype.upper().replace('_', ' ')}..."})
 
     try:
         if atype == "open_app":

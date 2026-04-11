@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { Component, ReactNode, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useConfig } from './hooks/useConfig';
 import AgentView from './pages/AgentView';
 import History from './pages/History';
@@ -82,6 +82,37 @@ function CosmicField() {
       ))}
     </div>
   );
+}
+
+interface EBProps { children: ReactNode; fallback?: ReactNode; }
+interface EBState { hasError: boolean; error?: Error; }
+
+class ErrorBoundary extends Component<EBProps, EBState> {
+  constructor(props: EBProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error): EBState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('[Yuki ErrorBoundary]', error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback ?? (
+        <div style={{ padding: 24, color: '#ff6b6b', fontFamily: 'monospace' }}>
+          <p>⚠ UI component crashed.</p>
+          <pre style={{ fontSize: 11, opacity: 0.7 }}>{this.state.error?.message}</pre>
+          <button onClick={() => this.setState({ hasError: false })}>Retry</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 export default function App() {
@@ -389,25 +420,27 @@ export default function App() {
       case 'chat':
       case 'listen':
         return (
-          <AgentView 
-            viewMode={currentPage === 'chat' ? 'chat' : 'voice'} 
-            orbState={orbState} 
-            statusLabel={statusLabel} 
-            transcription={transcription} 
-            messages={messages} 
-            clarifyQuestion={clarifyQuestion} 
-            clarifyOptions={clarifyOptions} 
-            isHotListening={isHotListening} 
-            onTrigger={handleTrigger} 
-            onSendMessage={handleSendMessage} 
-            onChoice={handleChoice} 
-            selectedProvider={selectedProvider}
-            onProviderChange={handleProviderChange}
-          />
+          <ErrorBoundary key={currentPage}>
+            <AgentView 
+              viewMode={currentPage === 'chat' ? 'chat' : 'voice'} 
+              orbState={orbState} 
+              statusLabel={statusLabel} 
+              transcription={transcription} 
+              messages={messages} 
+              clarifyQuestion={clarifyQuestion} 
+              clarifyOptions={clarifyOptions} 
+              isHotListening={isHotListening} 
+              onTrigger={handleTrigger} 
+              onSendMessage={handleSendMessage} 
+              onChoice={handleChoice} 
+              selectedProvider={selectedProvider}
+              onProviderChange={handleProviderChange}
+            />
+          </ErrorBoundary>
         );
-      case 'history': return <History messages={messages} />;
-      case 'settings': return <Settings />;
-      case 'dashboard': return <Dashboard stats={systemStats} logs={systemLogs} usage={sessionUsage} />;
+      case 'history': return <ErrorBoundary key={currentPage}><History messages={messages} /></ErrorBoundary>;
+      case 'settings': return <ErrorBoundary key={currentPage}><Settings /></ErrorBoundary>;
+      case 'dashboard': return <ErrorBoundary key={currentPage}><Dashboard stats={systemStats} logs={systemLogs} usage={sessionUsage} /></ErrorBoundary>;
       default: return null;
     }
   };

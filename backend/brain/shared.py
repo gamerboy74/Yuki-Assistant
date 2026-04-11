@@ -163,17 +163,22 @@ def clear_history() -> None:
 def _trim_history() -> None:
     """Keep only the most recent messages, respecting tool call integrity. Must be called under lock."""
     global _history
-    if len(_history) > _MAX_HISTORY * 2:
-        target_cut = len(_history) - (_MAX_HISTORY * 2)
-        
-        # We must NOT cut between assistant(tool_calls) and tool(result).
-        # Safe cuts are always BEFORE a 'user' message.
-        safe_cut = target_cut
-        while safe_cut > 0 and _history[safe_cut].get("role") != "user":
-            safe_cut -= 1
-            
-        if safe_cut > 0:
-            _history = _history[safe_cut:]
-        else:
-            # Fallback: if no user message found (unlikely), just keep minimum
-            _history = _history[-(_MAX_HISTORY * 2):]
+    if len(_history) <= _MAX_HISTORY * 2:
+        return
+
+    target_cut = len(_history) - (_MAX_HISTORY * 2)
+
+    # Walk forward from target_cut to find a clean user message boundary
+    safe_cut = target_cut
+    while safe_cut < len(_history):
+        msg = _history[safe_cut]
+        # A "user" role message that is NOT a tool result is a safe cut point
+        if msg.get("role") == "user" and "tool_call_id" not in msg:
+            break
+        safe_cut += 1
+
+    if safe_cut < len(_history):
+        _history = _history[safe_cut:]
+    else:
+        # Nuclear fallback: keep only the last 2 exchanges
+        _history = _history[-4:]

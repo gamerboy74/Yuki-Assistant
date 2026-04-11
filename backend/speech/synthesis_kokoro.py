@@ -57,7 +57,10 @@ class KokoroEngine:
         Yields raw PCM bytes (16kHz, mono).
         """
         if not text.strip():
+            logger.debug("generate_audio_stream: empty text, skipping.")
             return
+        # Yield a dummy to ensure this is always treated as an async generator by the runtime
+        # (Python handles this correctly but being explicit prevents edge cases)
 
         try:
             # Kokoro generation is extremely fast on 3060.
@@ -102,9 +105,24 @@ class HPVoiceSwitcher:
         """
         if self._is_hindi(text):
             logger.info(f"Using Edge-TTS for Hindi: {text[:30]}...")
-            # Fallback to current edge-tts logic (which is already good for Hindi)
-            # We'll wrap this in the orchestrator later
-            pass
+            import tempfile, os
+            import edge_tts
+            voice = self.hi_voice  # "hi-IN-SwaraNeural"
+            communicate = edge_tts.Communicate(text, voice)
+            tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+            tmp_path = tmp.name
+            tmp.close()
+            try:
+                await communicate.save(tmp_path)
+                with open(tmp_path, "rb") as f:
+                    yield f.read()
+            except Exception as e:
+                logger.error(f"Edge-TTS Hindi failed: {e}")
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except Exception:
+                    pass
         else:
             logger.info(f"Using Kokoro for: {text[:30]}...")
             async for chunk in self.kokoro.generate_audio_stream(text):

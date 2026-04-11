@@ -43,6 +43,18 @@ class YukiOrchestrator:
         self.mode = "idle" # "idle" (wake word) or "active" (VAD)
         self.is_speaking = False
         self.stop_playback_event = asyncio.Event()
+
+        # Wire the orchestrator's stop event to synthesis.py's stop function
+        # so barge-in halts ALL audio paths
+        import backend.speech.synthesis as _synth_module
+
+        _orig_stop_set = self.stop_playback_event.set
+
+        def _patched_stop_set():
+            _synth_module.stop_speech()
+            _orig_stop_set()
+
+        self.stop_playback_event.set = _patched_stop_set
         self.wake_event = asyncio.Event()
         self.turn_lock = asyncio.Lock()
         self._mixer_ready = False
@@ -373,24 +385,29 @@ class YukiOrchestrator:
 
         # Start parallel background synthesis and playback queues
         self.stop_playback_event.clear()
-        self._synth_queue = asyncio.Queue()
-        self._play_queue = asyncio.Queue()
+        self.stop_playback_event.clear()
         
-        self._synth_task = asyncio.create_task(self._synth_worker(turn_id))
-        self._playback_task = asyncio.create_task(self._audio_playback_worker(turn_id))
+        # Capture as locals so workers use THIS turn's queues, not self's (which may be replaced)
+        synth_queue = asyncio.Queue()
+        play_queue = asyncio.Queue()
+        self._synth_queue = synth_queue
+        self._play_queue = play_queue
+        
+        self._synth_task = asyncio.create_task(self._synth_worker(turn_id, synth_queue, play_queue))
+        self._playback_task = asyncio.create_task(self._audio_playback_worker(turn_id, play_queue))
         
         has_native_audio = False
         async for event in self.brain_stream(transcript):
             if event["type"] == "audio_chunk":
                 # Stream multimodal audio directly to synth queue
                 has_native_audio = True
-                await self._synth_queue.put({"type": "native", "data": event["value"]})
+                await synth_queue.put({"type": "native", "data": event["value"]})
             elif event["type"] == "text_sentence":
                 text = event["value"]
                 # Only queue fallback TTS if we haven't seen native audio yet
                 if not has_native_audio:
                     self._emit("partial-response", turn_id=turn_id, text=text)
-                    await self._synth_queue.put({"type": "text", "data": text})
+                    await synth_queue.put({"type": "text", "data": text})
             elif event["type"] == "usage":
                 # Aggregate session tokens and cost
                 m_input = event.get("input", 0)
@@ -415,7 +432,7 @@ class YukiOrchestrator:
                 if action and action.get("type") != "none":
                     # Run actual OS command
                     logger.info(f"Neural Trigger: {action['type']} | params: {action.get('params')}")
-                    exec_result = await asyncio.to_thread(executor.execute, action)
+                    exec_result = await asyncio.to_thread(executor.execute, action, self.send)
                     
                     # Error Correction Loop:
                     # If executor returns an explicit message (like "I couldn't find that app"),
@@ -426,7 +443,7 @@ class YukiOrchestrator:
                 self._emit("response", turn_id=turn_id, text=final_text)
         
         # Signal end of stream to synth worker
-        await self._synth_queue.put(None)
+        await synth_queue.put(None)
         
         # We NO LONGER await playback here. Releasing the lock allows 
         # the next turn to start thinking while this one is still talking.
@@ -475,22 +492,22 @@ class YukiOrchestrator:
         
         self._mixer_ready = True
 
-    async def _synth_worker(self, turn_id: str):
+    async def _synth_worker(self, turn_id: str, synth_queue: asyncio.Queue, play_queue: asyncio.Queue):
         """Pre-fetches text from the brain and synthesizes it to files in parallel with playback."""
         try:
             from backend.speech import synthesis as cloud_tts
             while True:
-                item = await self._synth_queue.get()
+                item = await synth_queue.get()
                 if item is None:
                     # Signal EOF to playback queue
-                    await self._play_queue.put(None)
+                    await play_queue.put(None)
                     break
                     
                 if self.stop_playback_event.is_set():
                     continue
 
                 if item["type"] == "native":
-                    await self._play_queue.put(item)
+                    await play_queue.put({"type": "native", "data": item["data"]})
                 elif item["type"] == "text":
                     text = item["data"]
                     if self.use_elevenlabs_tts:
@@ -498,7 +515,7 @@ class YukiOrchestrator:
                             # Pre-fetch cloud TTS to a file
                             file_path = await cloud_tts.synthesize_to_file_async(text)
                             if file_path:
-                                await self._play_queue.put({"type": "file", "data": file_path})
+                                await play_queue.put({"type": "file", "data": file_path})
                                 continue
                         except Exception as e:
                             logger.warning(f"Synth failed, falling back to local: {e}")
@@ -506,17 +523,17 @@ class YukiOrchestrator:
                     
                     # Local Kokoro generator doesn't do files right now, 
                     # so we just push the text to be rendered inline.
-                    await self._play_queue.put({"type": "text_local", "data": text})
+                    await play_queue.put({"type": "text_local", "data": text})
 
         except Exception as e:
             logger.error(f"Synth worker failed: {e}")
-            await self._play_queue.put(None)
+            await play_queue.put(None)
 
-    async def _audio_playback_worker(self, turn_id: str):
+    async def _audio_playback_worker(self, turn_id: str, play_queue: asyncio.Queue):
         """Background task that pulls synthesized audio chunks/files and plays zero-gap."""
         try:
             while True:
-                item = await self._play_queue.get()
+                item = await play_queue.get()
                 if item is None:
                     break
                     
@@ -622,6 +639,7 @@ class YukiOrchestrator:
         """Plays local TTS (Kokoro/Edge) handling interruptions."""
         try:
             import pygame
+            import numpy as np
             self._ensure_mixer()
             
             audio_chunks = []
@@ -632,7 +650,19 @@ class YukiOrchestrator:
             
             if not self.stop_playback_event.is_set() and audio_chunks:
                 full_audio = b"".join(audio_chunks)
-                sound = pygame.mixer.Sound(buffer=full_audio)
+                
+                # Resample from Kokoro's native 24kHz to mixer's 44.1kHz
+                # Same pattern used in _play_native_chunk for Gemini audio
+                audio_int16 = np.frombuffer(full_audio, dtype=np.int16)
+                num_samples = len(audio_int16)
+                new_num_samples = int(num_samples * 44100 / 24000)
+                resampled = np.interp(
+                    np.linspace(0, num_samples, new_num_samples, endpoint=False),
+                    np.arange(num_samples),
+                    audio_int16
+                ).astype(np.int16)
+                
+                sound = pygame.mixer.Sound(buffer=resampled.tobytes())
                 channel = sound.play()
                 
                 while channel.get_busy():

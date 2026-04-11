@@ -17,7 +17,6 @@ Cooldown: won't repeat the same alert for 5 minutes.
 import threading
 import time
 import datetime
-import psutil
 from backend.utils.logger import get_logger
 from backend import memory as mem
 
@@ -34,6 +33,7 @@ try:
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
+    logger.warning("psutil not installed — proactive system monitoring disabled.")
 
 class ProactiveAgent:
     """Background thread that monitors system health and fires Yuki alerts."""

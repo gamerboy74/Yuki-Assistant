@@ -51,3 +51,5 @@ tsconfig.tsbuildinfo
 backend/data/
 
 build/
+
+scratch/

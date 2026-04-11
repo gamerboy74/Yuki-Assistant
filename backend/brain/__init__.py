@@ -87,8 +87,8 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
                 break
 
             elif p == "ollama":
-                from backend.brain_ollama import process_stream as ollama_stream
-                from backend.brain_ollama import is_available as ollama_ready
+                from backend.brain.ollama_brain import process_stream as ollama_stream
+                from backend.brain.ollama_brain import is_available as ollama_ready
                 
                 if not ollama_ready():
                     if not is_auto:

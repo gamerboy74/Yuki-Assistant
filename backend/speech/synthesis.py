@@ -74,7 +74,7 @@ def _ensure_mixer():
         logger.error(f"Mixer init failed in synthesis: {e}")
         return False
 
-def _play_audio_file(path: str):
+def _play_audio_file(path: str, stop_check=None):
     """Play an mp3/wav file via pygame and block until done."""
     if not _ensure_mixer():
         return
@@ -100,6 +100,9 @@ def _play_audio_file(path: str):
     pygame.mixer.music.play()
     while pygame.mixer.music.get_busy():
         if _playback_stop_event.is_set():
+            pygame.mixer.music.stop()
+            break
+        if stop_check and stop_check():
             pygame.mixer.music.stop()
             break
         time.sleep(0.01) # Tightened from 0.05 for seamless handoffs
