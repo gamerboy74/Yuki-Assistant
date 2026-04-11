@@ -49,17 +49,20 @@
 ### Installation
 1.  **Clone & Install**:
     ```powershell
-    git clone https://github.com/your-repo/yuki_assistant.git
+    git clone https://github.com/gamerboy74/Yuki-Assistant.git
     cd yuki_assistant
     npm install
     pip install -r requirements.txt
     ```
-2.  **Configure Link**:
-    Copy `.env.example` to `.env` and add your `GOOGLE_API_KEY`.
-3.  **Launch**:
+2.  **Launch**:
     ```powershell
     npm run electron:dev
     ```
+3.  **Link Your Brain**:
+    Once the HUD boots, click the **Settings (Cog)** icon. Paste your API keys (Google, OpenAI, or ElevenLabs) directly into the interface. 
+    
+    > [!TIP]
+    > Yuki automatically generates and manages your `yuki.config.json` file. You can also reference `yuki.config.json.example` for manual setup.
 
 ---
 

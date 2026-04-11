@@ -1,0 +1,57 @@
+{
+  "assistant": {
+    "name": "Yuki",
+    "wake_words": [
+      "hey yuki",
+      "ok yuki",
+      "yuki"
+    ],
+    "greeting": "Hey! I'm Yuki. Ask me anything, or say \"Hey Yuki\" to activate voice mode.",
+    "idle_label": "SAY \"HEY YUKI\"",
+    "tts_voice": "en-IN-NeerjaNeural",
+    "active_timeout_sec": 8.0
+  },
+  "vad": {
+    "speech_threshold": 0.65
+  },
+  "whisper": {
+    "model_size": "base",
+    "silence_threshold": 300,
+    "silence_timeout": 1.2,
+    "max_record_secs": 12
+  },
+  "router": {
+    "enabled": true,
+    "fuzzy_threshold": 0.72,
+    "log_fast_path": true
+  },
+  "gemini": {
+    "model": "gemini-2.0-flash",
+    "fallback_model": "gemini-2.5-flash-lite",
+    "use_lite_fallback": true,
+    "google_api_key": ""
+  },
+  "openai": {
+    "model": "gpt-4o-mini",
+    "openai_api_key": ""
+  },
+  "ollama": {
+    "model": "mistral:7b-instruct-q4_K_M",
+    "base_url": "http://localhost:11434"
+  },
+  "ai_correction": {
+    "model": "mistral:7b-instruct-q4_K_M"
+  },
+  "tts": {
+    "provider": "elevenlabs",
+    "elevenlabs_char_budget": 2000,
+    "elevenlabs_api_key": "",
+    "elevenlabs_voice_id": "",
+    "gain_db": 1,
+    "spatial_audio": false,
+    "resampling_hq": true
+  },
+  "brain": {
+    "provider": "openai"
+  }
+}
