@@ -33,14 +33,15 @@
 34. *   **Nexus Bridge (CDP)**: Direct browser communication over Chrome DevTools Protocol for low-latency element interaction.
 35. *   **Isolated Profiles**: Yuki maintains her own `.yuki_profile` to keep her agentic sessions separate from your personal browsing.
 
-### 🌊 Reactive Waveform
-*   **Frequency Visualizer**: A 5-bar vertical visualizer integrated directly into the terminal.
-*   **State-Aware**: The waveform shifts rhythms between **Listening** (high-amplitude), **Thinking** (scanning pulse), and **Speaking** (fluid oscillations).
+### 🌊 Local Neural Voice (Kokoro-82M)
+*   **Zero-Latency Synthesis**: Yuki uses high-performance local TTS powered by **Kokoro-82M**, allowing her to respond instantly even without an internet connection.
+*   **Hinglish Optimized**: Specially tuned to handle Hindi-English hybrid sentences with natural prosody.
+*   **Reactive Waveform**: A 5-bar vertical visualizer reflects her speech patterns in real-time, shifting rhythms between **Listening**, **Thinking**, and **Speaking**.
 
 ### 🧠 Multi-Link Brain Cascade
 *   **Primary Link**: **Gemini 2.0 Flash** for state-of-the-art reasoning and tool dispatching.
-*   **Neural Fallback**: Automatic failover to **OpenAI GPT-4o** or **Local Ollama (Gemma 3:4B)** if cloud quotas are hit.
-*   **Total Reliability**: Implemented circuit-breaker logic prevents "blackouts" by switching neural links in under 500ms.
+*   **Neural Economy**: Real-time monitoring of tokens and session cost via an integrated dashboard widget.
+*   **Total Reliability**: Implemented circuit-breaker logic prevents "blackouts" by switching to **OpenAI GPT-4o** or **Local Ollama (Gemma 3)** in under 500ms.
 
 ---
 
@@ -48,8 +49,9 @@
 
 ### Prerequisites
 - **Node.js 18+** & **Python 3.10+**
+- **espeak-ng**: Required for local Kokoro-82M voice synthesis.
 - **Ollama** (for local stability): `ollama pull gemma3:4b`
-- **NVIDIA GPU** (Optional): Recommended for sub-second Whisper transcription.
+- **NVIDIA GPU** (Optional): Recommended for sub-second Whisper transcription and neural synthesis.
 
 ### Installation
 1.  **Clone & Install**:
@@ -95,6 +97,7 @@ Yuki supports deep OS automation out of the box.
 
 ### Config Syncing
 All settings are stored in `yuki.config.json`.
+*   **Proactive Agent**: An autonomous background layer monitors neural link health, API quotas, and system thermal levels, providing audible alerts if maintenance is required.
 *   **Persistence Guard**: Yuki includes a hydration check to prevent UI restarts from resetting your custom ElevenLabs or Edge TTS settings.
 *   **Auto-Healing**: Missing configuration blocks are automatically restored using system defaults during boot.
 
@@ -106,6 +109,7 @@ All settings are stored in `yuki.config.json`.
 graph TD
     UI[Electron/React HUD] -->|Transcript| ORC[Python Orchestrator]
     ORC -->|VAD| MIC[Sentinel Voice Activity]
+    ORC -->|Health| PRO[Proactive Agent]
     ORC -->|Brain Cascade| LINK{Neural Link}
     LINK -->|Cloud| GEM[Gemini 2.0 / OpenAI]
     LINK -->|Local| OLL[Ollama / Gemma 3]
