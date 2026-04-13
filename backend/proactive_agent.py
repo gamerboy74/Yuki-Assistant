@@ -89,8 +89,8 @@ class ProactiveAgent:
         if self._cpu_high_count >= 2:  # Sustained for 2 polls (~60s)
             self._fire_alert(
                 "cpu",
-                f"Boss, your CPU has been running at {cpu:.0f}% for a while. "
-                "Want me to check what's causing it?"
+                f"Sir, I'm noticing sustained high load. Your CPU is at {cpu:.0f}%. "
+                "Shall I investigate the source of this strain for you?"
             )
             self._cpu_high_count = 0  # Reset after alerting
 
@@ -99,8 +99,8 @@ class ProactiveAgent:
         if vmem.percent > 90:
             self._fire_alert(
                 "ram",
-                f"Heads-up — RAM usage is at {vmem.percent:.0f}%. "
-                "You might want to close some apps."
+                f"Pardon the interruption, Sir, but your memory usage is at {vmem.percent:.0f}%. "
+                "It might be prudent to close a few background applications."
             )
 
         # ── 3. Battery ────────────────────────────────────────────────────
@@ -109,14 +109,14 @@ class ProactiveAgent:
             if battery.percent <= 10:
                 self._fire_alert(
                     "battery_critical",
-                    f"Boss, battery is critically low — {battery.percent:.0f}% remaining. "
-                    "Please plug in your charger!"
+                    f"Sir, battery levels are critical at {battery.percent:.0f}%. "
+                    "I strongly advise connecting to a power source immediately."
                 )
             elif battery.percent <= 20:
                 self._fire_alert(
                     "battery_low",
-                    f"Battery is at {battery.percent:.0f}%. "
-                    "Better plug in soon."
+                    f"Sir, we're down to {battery.percent:.0f}% battery. "
+                    "You might want to reach for a charger."
                 )
 
         # ── 4. Disk ───────────────────────────────────────────────────────
@@ -126,8 +126,8 @@ class ProactiveAgent:
             if free_gb < 5:
                 self._fire_alert(
                     "disk",
-                    f"Your C drive is almost full — only {free_gb:.1f} GB remaining. "
-                    "You may want to clean up some space."
+                    f"Sir, the primary drive is nearly at capacity. Only {free_gb:.1f} GB remaining. "
+                    "Shall I help you identify some files to archive?"
                 )
         except Exception:
             pass  # Non-fatal
@@ -147,6 +147,20 @@ class ProactiveAgent:
         # ── 6. Context Insights (Birthdays, etc.) ──────────────────────────
         # TODO: Implement local memory scanning for dates
         pass
+
+        # ── 7. Behavioral Pattern Suggestions ─────────────────────────────────────
+        # After 3+ sessions, Yuki notices habits and proactively offers them.
+        try:
+            from backend.brain import reasoning
+            patterns = mem.get_patterns()
+            suggestion = reasoning.get_proactive_suggestion(patterns)
+            
+            if suggestion:
+                hour = datetime.datetime.now().hour
+                # We use a combined key for habit cooldown to avoid spamming different habits
+                self._fire_alert(f"habit_general_{hour}", suggestion)
+        except Exception as e:
+            logger.error(f"[PROACTIVE] Pattern suggestion failed: {e}")
 
     def _fire_alert(self, alert_type: str, message: str) -> None:
         """Fire an alert if the cooldown has elapsed."""

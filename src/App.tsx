@@ -143,7 +143,7 @@ export default function App() {
   useEffect(() => {
     if (!window.yukiAPI) return;
 
-    window.yukiAPI.onState((msg: YukiMsg) => {
+    const handler = (msg: YukiMsg) => {
       console.log('[Yuki state]', msg);
       if (typeof msg.seq === 'number') {
         if (msg.seq <= lastSeqRef.current) return;
@@ -319,10 +319,12 @@ export default function App() {
           }
           break;
       }
-    });
+    };
+
+    window.yukiAPI.onState(handler);
 
     return () => {
-      window.yukiAPI?.removeStateListener();
+      window.yukiAPI?.removeStateListener(handler);
       if (idleTimer.current) clearTimeout(idleTimer.current);
       if (speakingWatchdog.current) clearTimeout(speakingWatchdog.current);
     };

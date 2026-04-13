@@ -116,6 +116,20 @@ def set_user(key: str, value: str) -> None:
     logger.info(f"[MEMORY] User.{key} = {value!r}")
 
 
+def get(key: str, default: any = None) -> any:
+    """Generic getter for any top-level key in the memory store."""
+    with _LOCK:
+        return _store.get(key, default)
+
+
+def set(key: str, value: any) -> None:
+    """Generic setter for any top-level key in the memory store."""
+    with _LOCK:
+        _store[key] = value
+        _save(_store)
+    logger.info(f"[MEMORY] Set {key} = {value!r}")
+
+
 def set_preference(category: str, value: str) -> None:
     """Store 'I prefer X for Y' type facts under user.preferences."""
     with _LOCK:
@@ -164,6 +178,12 @@ def forget(query: str) -> str:
         _save(_store)
     logger.info(f"[MEMORY] Forgot: {matched_text!r}")
     return f"Okay, I've forgotten that."
+
+
+def get_all_memories() -> list[dict]:
+    """Return the raw list of all stored memories."""
+    with _LOCK:
+        return list(_store["memories"])
 
 
 def recall(query: str = "", n: int = 5) -> list[str]:
@@ -291,9 +311,10 @@ def context_block() -> str:
         sections.append("[NEURAL_MEMORIES]\n" + "\n".join(memory_lines))
 
     result = "\n\n".join(sections)
-    # Hard cap to prevent context bloat
-    if len(result) > 400:
-        result = result[:397] + "..."
+    # Neural Economy: Hard cap to prevent context bloat.
+    # 3,000 characters is plenty for background context without killing the session.
+    if len(result) > 3000:
+        result = result[:2997] + "..."
     return result
 
 
@@ -323,7 +344,7 @@ def get_greeting() -> str:
                     call_me = word.strip(".,!")
                     break
 
-    target_name = call_me or name or "boss"
+    target_name = call_me or name or "Sir"
 
     # 2. Determine time of day
     hour = datetime.now().hour
@@ -365,3 +386,46 @@ def get_greeting() -> str:
     }
 
     return random.choice(GREETINGS[period])
+
+
+# ── Behavioral Pattern Tracking ───────────────────────────────────────────────
+
+def track_pattern(action: str, hour: int) -> None:
+    """
+    Record that an action was performed at a given hour.
+    Key format: "{action}_{hour}" → count
+    Capped at 500 entries to prevent bloat.
+    """
+    with _LOCK:
+        patterns = _store.setdefault("patterns", {})
+        key = f"{action}_{hour}"
+        patterns[key] = patterns.get(key, 0) + 1
+        # Trim if needed: keep highest-count entries
+        if len(patterns) > 500:
+            sorted_items = sorted(patterns.items(), key=lambda x: x[1], reverse=True)
+            _store["patterns"] = dict(sorted_items[:400])
+        _save(_store)
+
+
+def get_patterns() -> dict:
+    """Return the full usage pattern dict."""
+    with _LOCK:
+        return dict(_store.get("patterns", {}))
+
+
+def get_top_actions_for_hour(hour: int, min_count: int = 3, n: int = 2) -> list[str]:
+    """
+    Return the top N tools the user most commonly uses at this hour.
+    Only returns actions seen at least min_count times (real pattern, not noise).
+    """
+    with _LOCK:
+        patterns = _store.get("patterns", {})
+
+    hour_actions: dict[str, int] = {}
+    for key, count in patterns.items():
+        if key.endswith(f"_{hour}") and count >= min_count:
+            action = key.rsplit("_", 1)[0]
+            hour_actions[action] = count
+
+    sorted_actions = sorted(hour_actions.items(), key=lambda x: x[1], reverse=True)
+    return [action for action, _ in sorted_actions[:n]]

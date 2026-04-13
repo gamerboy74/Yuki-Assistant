@@ -16,12 +16,13 @@ class ComputerHandsPlugin(Plugin):
     parameters = {
         "operation": {
             "type": "string",
-            "description": "Task: type_text, key_shortcut, click, move_mouse, smart_navigate",
+            "description": "Task: type_text, key_shortcut, click, move_mouse, smart_navigate, click_at, clipboard",
             "required": True
         },
-        "text": {"type": "string", "description": "Text to type", "required": False},
+        "text": {"type": "string", "description": "Text to type or copy", "required": False},
         "keys": {"type": "array", "items": {"type": "string"}, "description": "Keys for shortcut", "required": False},
         "target": {"type": "string", "description": "UI element name for smart_navigate", "required": False},
+        "action": {"type": "string", "description": "For clipboard: 'copy' or 'paste'", "required": False},
         "x": {"type": "integer", "description": "X coordinate", "required": False},
         "y": {"type": "integer", "description": "Y coordinate", "required": False},
     }
@@ -32,10 +33,18 @@ class ComputerHandsPlugin(Plugin):
             pyautogui.FAILSAFE = True
             
             if operation == "type_text":
+                import pyperclip
                 text = params.get("text", "")
                 time.sleep(0.5)
-                pyautogui.typewrite(text, interval=0.02)
-                return f"Typed: '{text}'"
+                
+                # Unicode-safe: paste via clipboard if non-ASCII detected
+                if any(ord(c) >= 128 for c in text):
+                    pyperclip.copy(text)
+                    pyautogui.hotkey("ctrl", "v")
+                else:
+                    pyautogui.typewrite(text, interval=0.02)
+
+                return f"Typed: '{text[:40]}...'" if len(text) > 40 else f"Typed: '{text}'"
 
             elif operation == "key_shortcut":
                 keys = params.get("keys", [])
@@ -54,6 +63,20 @@ class ComputerHandsPlugin(Plugin):
                 x, y = params.get("x", 0), params.get("y", 0)
                 pyautogui.moveTo(x, y, duration=0.25)
                 return f"Moved mouse to {x}, {y}"
+
+            elif operation == "click_at":
+                x, y = params.get("x", 0), params.get("y", 0)
+                pyautogui.click(x, y)
+                return f"Clicked at coordinates {x}, {y}"
+
+            elif operation == "clipboard":
+                import pyperclip
+                action = params.get("action", "paste")
+                if action == "copy":
+                    pyperclip.copy(params.get("text", ""))
+                    return "Copied to clipboard."
+                else:
+                    return f"Clipboard content: {pyperclip.paste()}"
 
             return f"Unknown operation: {operation}"
         except Exception as e:

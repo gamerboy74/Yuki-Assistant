@@ -1,5 +1,17 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Global registry for state listeners to prevent cross-contamination
+const stateListeners = new Set();
+ipcRenderer.on('yuki:state', (_event, msg) => {
+  stateListeners.forEach(callback => {
+    try { 
+      if (typeof callback === 'function') callback(msg); 
+    } catch (e) { 
+      console.error('IPC Callback Error:', e); 
+    }
+  });
+});
+
 contextBridge.exposeInMainWorld('yukiAPI', {
   // Window controls
   minimize: ()         => ipcRenderer.send('window:minimize'),
@@ -9,10 +21,16 @@ contextBridge.exposeInMainWorld('yukiAPI', {
   setMode:  (mode)     => ipcRenderer.send('window:set-mode', mode),
 
   // Receive state events from Python backend.
-  // Safe to call multiple times — removes previous listener first.
   onState: (callback) => {
-    ipcRenderer.removeAllListeners('yuki:state');
-    ipcRenderer.on('yuki:state', (_event, msg) => callback(msg));
+    stateListeners.add(callback);
+    // Note: We don't return the cleanup function because contextBridge strips it.
+    // Instead, components should use removeStateListener(callback).
+  },
+
+  // Targeted removal (or global if needed for legacy components)
+  removeStateListener: (callback) => {
+    if (callback) stateListeners.delete(callback);
+    else stateListeners.clear();
   },
 
   // Send user clarification choice back to Python
@@ -35,13 +53,9 @@ contextBridge.exposeInMainWorld('yukiAPI', {
     ipcRenderer.on('yuki:load-history', (_event, messages) => callback(messages));
   },
 
-  // Remove state listener on cleanup
-  removeStateListener: () => ipcRenderer.removeAllListeners('yuki:state'),
-
   // Settings & Memory
   saveSettings: (payload) => ipcRenderer.send('yuki:save-settings', payload),
   getSettings:  () => ipcRenderer.invoke('yuki:get-settings'),
   purgeMemory:  () => ipcRenderer.send('yuki:purge-memory'),
   sendCommand:  (cmd)     => ipcRenderer.send('yuki:command', cmd),
 });
-

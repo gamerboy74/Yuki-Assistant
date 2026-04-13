@@ -56,6 +56,11 @@ class WakeWordDetector:
         self.sensitivity = float(os.environ.get("WAKE_WORD_SENSITIVITY", 0.7))
         # Cancellation event — set by stop() to break listening loops
         self._stop_event = threading.Event()
+        self._vosk_rec = None
+        self._vosk_model = None
+        
+        # Load Vosk for streaming if needed
+        self._init_streaming()
 
         try:
             import pvporcupine
@@ -86,6 +91,63 @@ class WakeWordDetector:
     def reset(self) -> None:
         """Clear the stop flag so the detector can be reused."""
         self._stop_event.clear()
+
+    def _init_streaming(self):
+        """Pre-loads Vosk model for instant chunk processing."""
+        try:
+            import vosk
+            import json
+            vosk.SetLogLevel(-1)
+            logger.info("[WAKE] Initializing localized Vosk engine for zero-latency streaming...")
+            self._vosk_model = vosk.Model(lang="en-us")
+            
+            # Restrict grammar to ONLY wake words for extreme speed
+            grammar_list = [w.lower() for w in self.wake_words]
+            grammar_list.append("[unk]")
+            self._vosk_rec = vosk.KaldiRecognizer(self._vosk_model, 16000, json.dumps(grammar_list))
+            logger.info(f"[WAKE] Streaming engine ready. Watching for: {self.wake_words}")
+        except Exception as e:
+            logger.warning(f"[WAKE] Streaming Vosk init failed: {e}. Falling back to slow Whisper mode.")
+
+    def process_chunk(self, audio_data: bytes) -> bool:
+        """
+        Non-blocking chunk processing for real-time detection.
+        Returns True if a wake word was detected in this chunk.
+        """
+        if not self._vosk_rec:
+            return False
+            
+        try:
+            import json
+            # 1. Update noise floor
+            self.processor.update_noise_floor(audio_data)
+            
+            # 2. Gate audio
+            if not self.processor.is_speech(audio_data, sensitivity=self.sensitivity):
+                return False
+                
+            if self._vosk_rec.AcceptWaveform(audio_data):
+                res = json.loads(self._vosk_rec.Result())
+                text = res.get("text", "").lower()
+            else:
+                res = json.loads(self._vosk_rec.PartialResult())
+                text = res.get("partial", "").lower()
+                
+            if not text:
+                return False
+
+            # Normalize and check
+            text = text.replace("yuuki", "yuki").replace("uk", "yuki")
+            for wake_word in self.wake_words:
+                if wake_word in text:
+                    logger.info(f"[WAKE] Neural Stream Match: '{wake_word}'")
+                    # Reset recognizer for next capture
+                    self._vosk_rec.Reset()
+                    return True
+        except Exception as e:
+            logger.error(f"Stream wake processing error: {e}")
+            
+        return False
 
     def listen_for_wake_word(self) -> bool:
         """

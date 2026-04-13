@@ -45,9 +45,10 @@ export const VoicesPanel = memo(({
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-1">
           {[
+            { id: 'kokoro', label: 'KOKORO (LOCAL)', color: 'secondary', usage: 'PERFORMANCE', progress: 100 },
             { id: 'edge-tts', label: 'EDGE-TTS', color: 'primary', usage: 'FREE', progress: 100 },
-            { id: 'elevenlabs', label: 'ELEVENLABS', color: 'secondary', usage: `LIMIT: ${state.elevenlabsBudget}`, progress: (state.elevenlabsBudget / 1000) * 100 },
-            { id: 'pyttsx3', label: 'PYTTSX3', color: 'tertiary', usage: 'OFFLINE', progress: 20 }
+            { id: 'elevenlabs', label: 'ELEVENLABS', color: 'tertiary', usage: `LIMIT: ${state.elevenlabsBudget}`, progress: (state.elevenlabsBudget / 1000) * 100 },
+            { id: 'pyttsx3', label: 'PYTTSX3', color: 'outline', usage: 'OFFLINE', progress: 20 }
           ].map(p => (
             <div key={p.id} onClick={() => onUpdate('tts.provider', p.id)}
               className={`bg-surface-container-low p-6 border-l-2 cursor-pointer transition-opacity ${state.provider === p.id ? `border-${p.color}` : 'border-outline-variant/20 opacity-60 hover:opacity-100'}`}>

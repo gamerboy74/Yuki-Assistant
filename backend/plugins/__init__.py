@@ -59,6 +59,7 @@ def _discover_plugins():
             logger.warning(f"[PLUGINS] Failed to load module '{module_name}': {e}")
 
     _discovered = True
+    logger.info(f"[PLUGINS] Discovery complete. Active Registry: {list(_registry.keys())}")
 
 
 

@@ -41,6 +41,9 @@ class WhatsAppMessagePlugin(Plugin):
             pyautogui.press("enter")
             time.sleep(1.0)
             pyautogui.typewrite(message, interval=0.02)
+            
+            # Safety Sentinel: 0.5s visual verification window before final Enter
+            time.sleep(0.5)
             pyautogui.press("enter")
 
             return f"Sent '{message}' to {contact} on WhatsApp."

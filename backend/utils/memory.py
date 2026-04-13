@@ -42,7 +42,7 @@ class MemoryManager:
         except Exception as e:
             logger.error(f"Failed to save fact: {e}")
 
-    def get_recent_facts((self, limit: int = 5) -> str:
+    def get_recent_facts(self, limit: int = 5) -> str:
         """Retrieve recent context to inject into current turn."""
         try:
             conn = sqlite3.connect(DB_PATH)

@@ -23,9 +23,23 @@ from backend import memory as mem
 logger = get_logger(__name__)
 
 # IPC helpers
+import numpy as np
+
+class YukiJSONEncoder(json.JSONEncoder):
+    """Handles non-standard types (numpy, float32) for the Electron bridge."""
+    def default(self, obj):
+        if isinstance(obj, (np.float32, np.float64, np.float16)):
+            return float(obj)
+        if isinstance(obj, (np.int32, np.int64)):
+            return int(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
+
 def send(msg: dict) -> None:
     try:
-        print(json.dumps(msg), flush=True)
+        # Use custom encoder to prevent float32/numpy serialisation errors
+        print(json.dumps(msg, cls=YukiJSONEncoder), flush=True)
     except Exception as e:
         logger.error(f"stdout send error: {e}")
 
@@ -45,6 +59,11 @@ async def monitor_loop(stop_event: asyncio.Event):
             send({"type": "status", "data": stats})
         except Exception:
             pass
+        
+        # Periodic Garbage Collection to minimize baseline RAM footprint
+        import gc
+        gc.collect()
+        
         await asyncio.sleep(10)
 
 async def main():
@@ -71,7 +90,17 @@ async def main():
         """Cancel active listening mode from UI trigger toggle."""
         asyncio.create_task(orchestrator.handle_cancel_listening())
     
+    _last_voices_fetch = 0
+    _last_models_fetch = 0
+
     async def _handle_get_voices_async():
+        nonlocal _last_voices_fetch
+        now = time.time()
+        if now - _last_voices_fetch < 10: # 10s debounce
+            logger.debug("get_voices called too frequently, skipping.")
+            return
+        _last_voices_fetch = now
+        
         from backend.speech.synthesis import get_voices_async
         v_list = await get_voices_async()
         
@@ -94,6 +123,22 @@ async def main():
 
     def _handle_get_voices():
         asyncio.create_task(_handle_get_voices_async())
+
+    async def _handle_get_models_async():
+        nonlocal _last_models_fetch
+        now = time.time()
+        if now - _last_models_fetch < 10: # 10s debounce
+            logger.debug("get_models called too frequently, skipping.")
+            return
+        _last_models_fetch = now
+
+        from backend.brain import gemini_brain
+        m_list = gemini_brain.get_available_models()
+        send({"type": "gemini_models", "data": m_list})
+        logger.info(f"Dispatched {len(m_list)} neural models to UI.")
+
+    def _handle_get_models():
+        asyncio.create_task(_handle_get_models_async())
     
     # 3. Simple stdin handler (legacy bridge)
     def stdin_reader():
@@ -112,10 +157,10 @@ async def main():
                     loop.call_soon_threadsafe(_handle_text_input, str(data.get("value", "")))
                 elif data.get("type") == "choice":
                     loop.call_soon_threadsafe(_handle_text_input, str(data.get("value", "")))
-                elif data.get("type") == "yuki:command": # Actually main.cjs sends raw command
-                    cmd_data = data.get("value", {})
-                    if cmd_data.get("type") == "get_voices":
-                        loop.call_soon_threadsafe(_handle_get_voices)
+                elif data.get("type") == "get_voices":
+                    loop.call_soon_threadsafe(_handle_get_voices)
+                elif data.get("type") == "get_models":
+                    loop.call_soon_threadsafe(_handle_get_models)
                 elif data.get("type") == "save_settings":
                     from backend.config import update_from_dict
                     new_val = data.get("value", {})
@@ -132,16 +177,13 @@ async def main():
                         # Quick vocal confirmation of neural link swap
                         msg = f"Neural link established with {new_provider.title()}."
                         orchestrator.speak(msg)
-                elif data.get("type") == "get_voices":
-                    loop.call_soon_threadsafe(_handle_get_voices)
                 elif data.get("type") == "preview_voice":
                     v_id = data.get("voiceId")
                     v_prov = data.get("provider", "edge-tts")
                     text = data.get("text", "Neural Link Established. This is a preview of my current vocal configuration.")
                     asyncio.run_coroutine_threadsafe(orchestrator.handle_preview_voice(text, v_id, v_prov), loop)
                 elif data.get("type") == "purge_memory":
-                    from backend import memory as mem
-                    mem.clear_session_context()
+                    mem.clear_all()
                     logger.info("Memory vault purged.")
             except Exception as e:
                 import traceback

@@ -7,18 +7,10 @@ from typing import AsyncGenerator
 from backend.utils.logger import get_logger
 from backend.config import cfg
 
-# ── Heavy Neural Imports ──
-# Moved to top level for better OS caching and parallel load stability.
-try:
-    from kokoro import KPipeline
-    import torch
-    import torchaudio
-except ImportError:
-    # We allow the file to load for linting/type-checking, 
-    # but runtime will fail gracefully in _load_engine.
-    KPipeline = None
-    torch = None
-    torchaudio = None
+# ── Heavy Neural Imports (Lazy-loaded) ──
+KPipeline = None
+torch = None
+torchaudio = None
 
 logger = get_logger(__name__)
 
@@ -41,13 +33,19 @@ class KokoroEngine:
         await asyncio.to_thread(self._load_engine)
 
     def _load_engine(self):
+        global KPipeline, torch, torchaudio
         try:
+            # Lazy imports
+            if KPipeline is None:
+                from kokoro import KPipeline as _KPipeline
+                import torch as _torch
+                import torchaudio as _torchaudio
+                KPipeline = _KPipeline
+                torch = _torch
+                torchaudio = _torchaudio
+
             # Initialize pipeline with 'a' (American English) which handles Hinglish well.
             logger.info("Loading Kokoro-82M weights...")
-            
-            if KPipeline is None:
-                raise ImportError("kokoro library not installed.")
-            
             self.pipeline = KPipeline(lang_code='a') 
             logger.info("Kokoro-82M engine loaded.")
         except Exception as e:

@@ -14,6 +14,8 @@ APP_MAP = {
     "google chrome":    "chrome",
     "browser":          "chrome",
     "firefox":          "firefox",
+    "brave":            "brave",
+    "brave browser":    "brave",
     "edge":             "msedge",
     "microsoft edge":   "msedge",
     "notepad":          "notepad",
@@ -51,6 +53,8 @@ KILL_MAP = {
     "chrome": "chrome.exe",
     "google chrome": "chrome.exe",
     "firefox": "firefox.exe",
+    "brave": "brave.exe",
+    "brave browser": "brave.exe",
     "edge": "msedge.exe",
     "notepad": "notepad.exe",
     "spotify": "Spotify.exe",
@@ -72,6 +76,10 @@ class OpenAppPlugin(Plugin):
 
     def execute(self, name: str = "", **params) -> str:
         name = name.lower().strip()
+        # ── Domain Guard ──
+        if "." in name and not any(app in name for app in ["discord", "vs code", "vscode"]):
+             return f"Sir, '{name}' appears to be a website rather than an application. I should use the browser navigation protocol for this."
+             
         exe = APP_MAP.get(name, name)
         
         try:
@@ -80,6 +88,12 @@ class OpenAppPlugin(Plugin):
             elif ":" in exe: os.startfile(exe)
             else:
                 subprocess.Popen(["start", "", exe], shell=True)
+            
+            # Focus Stabilization: Give Windows time to launch and focus the GUI
+            if name in ["notepad", "word", "excel", "spotify", "discord", "chrome"]:
+                import time
+                time.sleep(1.5)
+                
             return f"Opening {name}."
         except Exception as e:
             logger.error(f"[OPEN_APP] Failed: {e}")
@@ -100,3 +114,17 @@ class CloseAppPlugin(Plugin):
         except Exception as e:
             logger.error(f"[CLOSE_APP] Failed: {e}")
             return f"Failed to close {name}."
+
+class CloseActiveWindowPlugin(Plugin):
+    name = "close_active_window"
+    description = "Close the currently active window (Alt+F4)."
+    parameters = {}
+
+    def execute(self, **params) -> str:
+        try:
+            import pyautogui
+            pyautogui.hotkey('alt', 'f4')
+            return "Closed the active window, Sir."
+        except Exception as e:
+            logger.error(f"[CLOSE_ACTIVE] Failed: {e}")
+            return "Failed to close the active window."

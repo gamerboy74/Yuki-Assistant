@@ -44,12 +44,11 @@ def get_max_record_secs():
     return int(os.environ.get("MAX_RECORD_SECS") or _wc.get("max_record_secs", 12))
 
 # Whisper initial_prompt gives the model prior vocabulary about our app.
-# This dramatically reduces mishearing of app names and the wake word.
+# Including common Hinglish and Hindi commands significantly improves recognition of mixed speech.
 WHISPER_INITIAL_PROMPT = (
-    "Yuki, hey Yuki, open WhatsApp, open Chrome, open Spotify, open Telegram, "
-    "open Discord, open VS Code, open VLC, open Notepad, open Calculator, "
-    "play YouTube, search Google, screenshot, volume, battery, time, date, "
-    "send message, close app."
+    "Yuki, hey Yuki, mera naam, what is my name, gaana bajao, music play, open Spotify, "
+    "kholo, band karo, batao, suno, samajh gaye, weather update, search Google, "
+    "screenshot, volume, battery, time, WhatsApp, YouTube chalao."
 )
 
 _whisper_model = None
@@ -112,7 +111,9 @@ class AsyncWhisperStreamer:
         self.model = None
         self.model_size = get_model_size()
         self.local_files_only = local_files_only
-        logger.info(f"AsyncWhisperStreamer initialized (Neural link: Deferred). Mode: {'Offline' if local_files_only else 'Online'}")
+        # Pull dynamic language mode from config
+        self.lang_mode = cfg.get("assistant", {}).get("language_mode", "auto").lower()
+        logger.info(f"AsyncWhisperStreamer initialized. Mode: {'Offline' if local_files_only else 'Online'}, Language: {self.lang_mode}")
         
     def _load_model(self):
         """Lazy load and warm up the model on the GPU."""
@@ -165,6 +166,16 @@ class AsyncWhisperStreamer:
             return ""
             
         try:
+            # Refresh language mode from config in case it changed in the UI
+            self.lang_mode = cfg.get("assistant", {}).get("language_mode", "auto").lower()
+            
+            # Map simplified names to Whisper ISO codes
+            whisper_lang = None # Default Auto
+            if self.lang_mode == "hindi" or self.lang_mode == "hinglish":
+                whisper_lang = "hi"
+            elif self.lang_mode == "english":
+                whisper_lang = "en"
+
             # Convert bytes to float32 np array (faster-whisper baseline)
             audio_int16 = np.frombuffer(audio_data, dtype=np.int16)
             audio_float32 = audio_int16.astype(np.float32) / 32768.0
@@ -174,9 +185,10 @@ class AsyncWhisperStreamer:
             def _run():
                 segments, info = self.model.transcribe(
                     audio_float32,
-                    language=None, # Auto-detect English/Hindi/Hinglish
+                    language=whisper_lang,  # Locked if configured
                     task="transcribe",
-                    beam_size=5,
+                    bridge=True,            # Ensures punctuation/casing for better neural parsing
+                    beam_size=1,            # Neural Economy: 1 is much faster for real-time interaction
                     vad_filter=True,
                     initial_prompt=WHISPER_INITIAL_PROMPT
                 )

@@ -38,10 +38,13 @@ DEFAULT_CONFIG = {
         "log_fast_path": True
     },
     "gemini": {
-        "model": "gemini-2.0-flash",
-        "fallback_model": "gemini-2.5-flash-lite",
-        "use_lite_fallback": True,
-        "google_api_key": ""
+        "active_provider": "google_ai_studio", 
+        "google_ai_studio": {
+            "api_key": "",
+            "model": "gemini-2.0-flash"
+        },
+        "fallback_model": "gemini-2.0-flash-lite",
+        "use_lite_fallback": True
     },
     "openai": {
         "model": "gpt-4o-mini",
@@ -63,6 +66,10 @@ DEFAULT_CONFIG = {
     },
     "brain": {
         "provider": "auto"
+    },
+    "spotify": {
+        "client_id": "",
+        "client_secret": ""
     }
 }
 
@@ -114,7 +121,7 @@ def update_from_dict(new_cfg: dict):
     # sneak into the root instead of staying inside 'assistant'.
     ALLOWED_ROOTS = {
         "assistant", "vad", "whisper", "router", "gemini", 
-        "openai", "ollama", "ai_correction", "tts", "brain", "chrome"
+        "openai", "ollama", "ai_correction", "tts", "brain", "chrome", "spotify"
     }
     
     filtered_cfg = {k: v for k, v in new_cfg.items() if k in ALLOWED_ROOTS}

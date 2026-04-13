@@ -8,8 +8,9 @@
     ],
     "greeting": "Hey! I'm Yuki. Ask me anything, or say \"Hey Yuki\" to activate voice mode.",
     "idle_label": "SAY \"HEY YUKI\"",
-    "tts_voice": "en-IN-NeerjaNeural",
-    "active_timeout_sec": 8.0
+    "tts_voice": "cgSgspJ2msm6clMCkdW9",
+    "active_timeout_sec": 8.0,
+    "language_mode": "english"
   },
   "vad": {
     "speech_threshold": 0.65
@@ -26,10 +27,13 @@
     "log_fast_path": true
   },
   "gemini": {
-    "model": "gemini-2.0-flash",
-    "fallback_model": "gemini-2.5-flash-lite",
-    "use_lite_fallback": true,
-    "google_api_key": ""
+    "active_provider": "google_ai_studio",
+    "google_ai_studio": {
+      "api_key": "YOUR_AIza_KEY",
+      "model": "gemini-2.0-flash"
+    },
+    "fallback_model": "gemini-3-flash-preview",
+    "use_lite_fallback": true
   },
   "openai": {
     "model": "gpt-4o-mini",
@@ -44,19 +48,24 @@
   },
   "tts": {
     "provider": "elevenlabs",
-    "elevenlabs_char_budget": 2000,
+    "elevenlabs_char_budget": 5000,
     "elevenlabs_api_key": "",
     "elevenlabs_voice_id": "",
-    "gain_db": 1,
+    "speed": 1.0,
+    "gain_db": 1.0,
     "spatial_audio": false,
     "resampling_hq": true
   },
   "brain": {
-    "provider": "openai"
+    "provider": "gemini"
+  },
+  "spotify": {
+    "client_id": "",
+    "client_secret": ""
   },
   "chrome": {
-    "preferred": "chrome",
-    "fallback": "brave",
+    "preferred": "brave",
+    "fallback": "chrome",
     "auto_launch": true,
     "cdp_port": 9222
   }

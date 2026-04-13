@@ -18,23 +18,34 @@ export default function Settings() {
   useEffect(() => {
     s.loadConfig();
 
+    const handler = (msg: any) => {
+      if (msg.type === 'voices') {
+        s.setVoices(msg.data, msg.chunk);
+      }
+      if (msg.type === 'gemini_models') {
+        s.updateSetting('availableGeminiModels', msg.data);
+      }
+    };
+
     // Listen for dynamic voices stream from backend
     // @ts-ignore
     if (window.yukiAPI?.onState) {
       // @ts-ignore
-      window.yukiAPI.onState((msg: any) => {
-        if (msg.type === 'voices') {
-          s.setVoices(msg.data, msg.chunk);
-        }
-      });
+      window.yukiAPI.onState(handler);
     }
 
-    // Request fresh voice list immediately
-    // @ts-ignore
-    window.yukiAPI?.sendCommand?.({ type: 'get_voices' });
+    // Request fresh lists only if current lists are empty (lazy ingestion)
+    if (s.availableVoices.length === 0) {
+      // @ts-ignore
+      window.yukiAPI?.sendCommand?.({ type: 'get_voices' });
+    }
+    if (s.availableGeminiModels.length <= 9) { // 9 is the default local list size
+      // @ts-ignore
+      window.yukiAPI?.sendCommand?.({ type: 'get_models' });
+    }
     
     // @ts-ignore
-    return () => window.yukiAPI?.removeStateListener?.();
+    return () => window.yukiAPI?.removeStateListener?.(handler);
   }, []);
 
   // 2. Auto-save Heartbeat (Debounced 1.5s)
@@ -49,9 +60,9 @@ export default function Settings() {
   }, [
     s.assistantName, s.idleLabel, s.greeting, s.wakeWords,
     s.whisperModel, s.silenceThold, s.silenceTime, s.maxRecordSecs,
-    s.geminiModel, s.geminiFallback, s.openaiModel, s.ollamaModel, s.ollamaUrl, s.routerOn, s.brainProvider,
+    s.geminiProvider, s.geminiModel, s.geminiFallback, s.vertexProjectId, s.vertexLocation, s.openaiModel, s.ollamaModel, s.ollamaUrl, s.routerOn, s.brainProvider,
     s.ttsProvider, s.ttsVoice, s.elBudget, s.speechThold, s.gainDb, s.spatialAudio, s.resamplingHq,
-    s.googleApiKey, s.openaiApiKey, s.elApiKey, s.elVoiceId, s.useLiteFallback, s.correctionModel, s.fuzzyThold, s.logFastPath,
+    s.googleApiKey, s.vertexKeyString, s.openaiApiKey, s.elApiKey, s.elVoiceId, s.useLiteFallback, s.correctionModel, s.fuzzyThold, s.logFastPath,
     s.browserPreferred, s.browserFallback, s.browserAutoLaunch, s.browserCdpPort
   ]);
 
@@ -67,8 +78,11 @@ export default function Settings() {
       'whisper.silenceTimeout': 'silenceTime',
       'whisper.maxRecordSecs': 'maxRecordSecs',
       'neural.brainProvider': 'brainProvider',
+      'neural.geminiProvider': 'geminiProvider',
       'neural.geminiModel': 'geminiModel',
       'neural.geminiFallback': 'geminiFallback',
+      'neural.vertexProjectId': 'vertexProjectId',
+      'neural.vertexLocation': 'vertexLocation',
       'neural.openaiModel': 'openaiModel',
       'neural.ollamaModel': 'ollamaModel',
       'neural.ollamaUrl': 'ollamaUrl',
@@ -85,6 +99,7 @@ export default function Settings() {
       'tts.spatialAudio': 'spatialAudio',
       'tts.resamplingHq': 'resamplingHq',
       'secrets.googleApiKey': 'googleApiKey',
+      'secrets.vertexKeyString': 'vertexKeyString',
       'secrets.openaiApiKey': 'openaiApiKey',
       'secrets.elApiKey': 'elApiKey',
       'secrets.elVoiceId': 'elVoiceId',
@@ -140,8 +155,11 @@ export default function Settings() {
 
   const neuralState = useMemo(() => ({
     brainProvider: s.brainProvider,
+    geminiProvider: s.geminiProvider,
     geminiModel: s.geminiModel,
     geminiFallback: s.geminiFallback,
+    vertexProjectId: s.vertexProjectId,
+    vertexLocation: s.vertexLocation,
     openaiModel: s.openaiModel,
     ollamaModel: s.ollamaModel,
     ollamaUrl: s.ollamaUrl,
@@ -150,7 +168,7 @@ export default function Settings() {
     correctionModel: s.correctionModel,
     fuzzyThreshold: s.fuzzyThold,
     logFastPath: s.logFastPath
-  }), [s.brainProvider, s.geminiModel, s.geminiFallback, s.openaiModel, s.ollamaModel, s.ollamaUrl, s.routerOn, s.useLiteFallback, s.correctionModel, s.fuzzyThold, s.logFastPath]);
+  }), [s.brainProvider, s.geminiProvider, s.geminiModel, s.geminiFallback, s.vertexProjectId, s.vertexLocation, s.openaiModel, s.ollamaModel, s.ollamaUrl, s.routerOn, s.useLiteFallback, s.correctionModel, s.fuzzyThold, s.logFastPath]);
 
   const ttsState = useMemo(() => ({
     provider: s.ttsProvider,
@@ -165,10 +183,11 @@ export default function Settings() {
 
   const secretsState = useMemo(() => ({
     googleApiKey: s.googleApiKey,
+    vertexKeyString: s.vertexKeyString,
     openaiApiKey: s.openaiApiKey,
     elApiKey: s.elApiKey,
     elVoiceId: s.elVoiceId
-  }), [s.googleApiKey, s.openaiApiKey, s.elApiKey, s.elVoiceId]);
+  }), [s.googleApiKey, s.vertexKeyString, s.openaiApiKey, s.elApiKey, s.elVoiceId]);
 
   const nexusState = useMemo(() => ({
     browserPreferred: s.browserPreferred,
@@ -221,6 +240,7 @@ export default function Settings() {
               state={neuralState} 
               secrets={secretsState} 
               onUpdate={handleUpdate} 
+              availableModels={s.availableGeminiModels}
             />
             </ErrorBoundary>
           )}

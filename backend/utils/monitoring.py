@@ -16,11 +16,15 @@ def get_system_stats():
     # Metadata - Respect the Dashboard selection (available even without psutil)
     provider = cfg.get("brain", {}).get("provider", "gemini").lower()
     if provider == "openai":
-        ai_model = f"OpenAI ({cfg.get('openai', {}).get('model', 'gpt-4o-mini')})"
+        ai_model = f"GPT ({cfg.get('openai', {}).get('model', 'gpt-4o-mini')})"
     elif provider == "ollama":
-        ai_model = f"Ollama ({cfg.get('ollama', {}).get('model', 'mistral')})"
+        ai_model = f"Ollama ({cfg.get('ollama', {}).get('model', 'gemma')})"
     else:
-        ai_model = f"Gemini ({cfg.get('gemini', {}).get('model', '2.0-flash')})"
+        # Gemini logic: Check AI Studio then root fallback
+        studio_model = cfg.get("gemini", {}).get("google_ai_studio", {}).get("model")
+        root_model = cfg.get("gemini", {}).get("model")
+        active_model = studio_model or root_model or "2.0-flash"
+        ai_model = f"Gemini ({active_model})"
 
     if not PSUTIL_AVAILABLE:
         return {

@@ -15,8 +15,11 @@ export interface SettingsState {
   };
   neural: {
     brainProvider: string;
+    geminiProvider: 'google_ai_studio' | 'vertex_ai';
     geminiModel: string;
     geminiFallback: string;
+    vertexProjectId: string;
+    vertexLocation: string;
     openaiModel: string;
     ollamaModel: string;
     ollamaUrl: string;
@@ -38,6 +41,7 @@ export interface SettingsState {
   };
   secrets: {
     googleApiKey: string;
+    vertexKeyString: string;
     openaiApiKey: string;
     elApiKey: string;
     elVoiceId: string;
@@ -72,8 +76,11 @@ const initialState: SettingsState = {
   },
   neural: {
     brainProvider: 'auto',
+    geminiProvider: 'google_ai_studio',
     geminiModel: 'gemini-2.0-flash',
     geminiFallback: 'gemini-2.5-flash-lite',
+    vertexProjectId: '',
+    vertexLocation: 'us-central1',
     openaiModel: 'gpt-4o-mini',
     ollamaModel: 'gemma3:4b',
     ollamaUrl: 'http://localhost:11434',
@@ -95,6 +102,7 @@ const initialState: SettingsState = {
   },
   secrets: {
     googleApiKey: '',
+    vertexKeyString: '',
     openaiApiKey: '',
     elApiKey: '',
     elVoiceId: '',

@@ -43,6 +43,12 @@ class YukiOrchestrator:
         self.mode = "idle" # "idle" (wake word) or "active" (VAD)
         self.is_speaking = False
         self.stop_playback_event = asyncio.Event()
+        self._current_brain_task = None
+        self._speech_streak = 0
+        self._pause_gate = asyncio.Event()
+        self._pause_gate.set() # Open by default
+        self.is_verifying_interruption = False
+        self._last_was_question = False
 
         # Wire the orchestrator's stop event to synthesis.py's global stop mechanism
         import backend.speech.synthesis as _synth_module
@@ -57,7 +63,7 @@ class YukiOrchestrator:
         self._turn_counter = 0
         self.active_mode_timeout_sec = float(
             cfg.get("assistant", {}).get("active_timeout_sec") or 
-            os.environ.get("YUKI_ACTIVE_MODE_TIMEOUT_SEC", "8")
+            os.environ.get("YUKI_ACTIVE_MODE_TIMEOUT_SEC", "5")
         )
         self._active_since = 0.0
         self.loop = None
@@ -88,6 +94,7 @@ class YukiOrchestrator:
         # Buffers
         self.audio_buffer = bytearray()
         self.recording = False
+        self._proactive_lock = asyncio.Lock()
 
     def _check_elevenlabs_ready(self) -> bool:
         """Check if ElevenLabs TTS is configured — checks config file AND env vars."""
@@ -226,7 +233,7 @@ class YukiOrchestrator:
                             asyncio.create_task(self._process_inline_turn(inline_cmd, turn_id))
                         else:
                             # Wake only: audible confirmation so user knows Yuki is listening.
-                            ack = "Yes boss?"
+                            ack = self._get_acknowledgment()
                             self._emit("response", text=ack)
                             await self._speak_alert(ack)
                             self._emit("listening")
@@ -240,20 +247,30 @@ class YukiOrchestrator:
                 and not self.is_speaking
                 and not self.turn_lock.locked()
                 and self._active_since > 0
-                and (time.time() - self._active_since) >= self.active_mode_timeout_sec
+                and (time.time() - self._active_since) >= self._get_current_timeout()
             ):
                 self.mode = "idle"
                 self._emit("idle")
                 continue
 
-            # 1. Direct Barge-In Check (VAD Confidence based)
+            # 1. Smarter Barge-In Check (Neural Economy 2.0)
             if self.is_speaking:
                 confidence = self.sentinel.get_speech_confidence(chunk)
-                if confidence > 0.7: 
-                    logger.info("[ORCHESTRATOR] Speech detected during playback. Interrupting...")
-                    self._log("Barge-in detected: Interrupting playback.")
+                if confidence > 0.85: # High bar for interruption
+                    self._speech_streak += 1
+                else:
+                    self._speech_streak = 0
+
+                if self._speech_streak >= 3: # Must be sustained speech (approx 100ms)
+                    logger.info("[ORCHESTRATOR] Sustained speech detected. Interrupting...")
+                    self._log("Barge-in: Interrupting for new command.")
                     self.stop_playback_event.set()
-            
+                    self._speech_streak = 0
+                    
+                    # Pause the brain loop rather than killing it immediately
+                    self._pause_gate.clear()
+                    self.is_verifying_interruption = True
+                    logger.debug("[ORCHESTRATOR] J.A.R.V.I.S. Protocol: Interaction paused for verification.")
             # 2. VAD State Machine
             event = self.vad_processor.process_chunk(chunk)
             
@@ -265,20 +282,69 @@ class YukiOrchestrator:
                 
             if self.recording:
                 self.audio_buffer.extend(chunk)
-                
+            
             if event == "speech_end":
                 self.recording = False
                 turn_id = self._new_turn_id()
                 self._emit("processing", turn_id=turn_id)
-                asyncio.create_task(self._process_turn(bytes(self.audio_buffer), turn_id))
+                
+                # If we were in the middle of a response, this is a barge-in
+                is_barge = self.is_speaking
+                
+                # Capture the current task to cancel it if needed
+                prev_task = self._current_brain_task if is_barge else None
+                
+                self._current_brain_task = asyncio.create_task(
+                    self._process_turn(bytes(self.audio_buffer), turn_id, is_barge=is_barge, previous_task=prev_task)
+                )
                 self.audio_buffer = bytearray()
+                
 
-    async def _process_turn(self, audio_data: bytes, turn_id: str):
+    async def _process_turn(self, audio_data: bytes, turn_id: str, is_barge: bool = False, previous_task: asyncio.Task | None = None):
         """Handles a single interaction turn."""
+        # 1. J.A.R.V.I.S. Protocol: Interruption Analysis
+        if is_barge:
+            try:
+                transcript = await self.stt.transcribe_bytes(audio_data)
+                clean_text = self._extract_inline_command(transcript)
+                
+                # Check for "Dismissal" or "Noise" (No command intent)
+                is_dismissal = not clean_text or any(w in clean_text.lower() for w in ["no", "nevermind", "ignore", "sorry", "continue"])
+                
+                if is_dismissal:
+                    logger.info(f"[ORCHESTRATOR] Interruption dismissed (transcript: '{clean_text}'). Resuming...")
+                    # If there was speech but it was unclear, ask for clarification
+                    if not clean_text and len(audio_data) > 3000: # Over ~200ms of audio
+                        phrase = self._get_verification_phrase()
+                        self._emit("response", text=phrase)
+                        await self._speak_alert(phrase)
+                    
+                    self.is_verifying_interruption = False
+                    self.stop_playback_event.clear()
+                    self._pause_gate.set() # RESUME OLD TURN
+                    self._emit("turn_completed", turn_id=turn_id)
+                    return
+                else:
+                    # Verified Interrupt: User has a new command
+                    logger.info(f"[ORCHESTRATOR] Verified interruption: '{clean_text}'. Terminating previous task.")
+                    if previous_task and not previous_task.done():
+                        previous_task.cancel()
+                    
+                    # Proceed to acquire turn lock and process as a new command
+                    self.is_verifying_interruption = False
+                    transcript = clean_text # Use the clean text for the new command
+            except Exception as e:
+                logger.error(f"Interruption logic failed: {e}")
+                self._pause_gate.set() # Failsafe: resume
+                return
+
         async with self.turn_lock:
             try:
-                # A. STT
-                transcript = await self.stt.transcribe_bytes(audio_data)
+                # If not already transcribed by barge-in logic
+                if not is_barge:
+                    transcript = await self.stt.transcribe_bytes(audio_data)
+                    transcript = self._extract_inline_command(transcript)
+                
                 if not transcript:
                     self.mode = "idle"
                     self._emit("turn_completed", turn_id=turn_id)
@@ -315,7 +381,10 @@ class YukiOrchestrator:
 
         async with self.turn_lock:
             try:
-                await self._process_transcript(transcript, turn_id, emit_transcript=False)
+                self._current_brain_task = asyncio.create_task(self._process_transcript(transcript, turn_id, emit_transcript=False))
+                await self._current_brain_task
+            except asyncio.CancelledError:
+                logger.info(f"[ORCHESTRATOR] Text turn {turn_id} cancelled.")
             except Exception as e:
                 logger.error(f"Text turn failed: {e}")
                 self._emit("response", turn_id=turn_id, text="I hit a runtime issue, but I am still online.")
@@ -395,6 +464,9 @@ class YukiOrchestrator:
         
         has_native_audio = False
         async for event in self.brain_stream(transcript):
+            # J.A.R.V.I.S Protocol: Pause point
+            await self._pause_gate.wait()
+            
             if event["type"] == "audio_chunk":
                 # Stream multimodal audio directly to synth queue
                 has_native_audio = True
@@ -407,29 +479,37 @@ class YukiOrchestrator:
                     await synth_queue.put({"type": "text", "data": text})
             elif event["type"] == "usage":
                 # Aggregate session tokens and cost
-                m_input = event.get("input", 0)
-                m_output = event.get("output", 0)
+                m_input = event.get("input") or 0
+                m_output = event.get("output") or 0
+                m_cached = event.get("cached") or 0
                 m_model = event.get("model", "gpt-4o-mini")
                 
-                cost = calculate_cost(m_model, m_input, m_output)
+                cost = calculate_cost(m_model, m_input, m_output, m_cached)
                 
                 self.session_usage["input"] += m_input
                 self.session_usage["output"] += m_output
+                self.session_usage["cached"] = self.session_usage.get("cached", 0) + m_cached
                 self.session_usage["cost"] += cost
                 
                 self._emit("usage_update", data=self.session_usage)
-                logger.info(f"[ORCHESTRATOR] Session Usage Updated: {self.session_usage['input']} in, {self.session_usage['output']} out. Total Cost: ${self.session_usage['cost']:.6f}")
+                logger.info(f"[ORCHESTRATOR] Session Usage Updated: {self.session_usage['input']} in (+{self.session_usage.get('cached', 0)} cached), {self.session_usage['output']} out. Total Cost: ${self.session_usage['cost']:.6f}")
 
             elif event["type"] == "tool_start":
                 self._emit("loading", turn_id=turn_id, text=f"{event['value']}...")
             elif event["type"] == "final_response":
                 final_text = event["value"]
+                # Conversational Persistence: Track if Yuki asked a question
+                self._last_was_question = final_text.strip().endswith("?")
                 action = event.get("action")
                 
                 if action and action.get("type") != "none":
                     # Run actual OS command
                     logger.info(f"Neural Trigger: {action['type']} | params: {action.get('params')}")
                     exec_result = await asyncio.to_thread(executor.execute, action, self.send)
+                    
+                    # Behavioral Learning: Track successful execution to learn user patterns
+                    from backend.brain import reasoning
+                    reasoning.track_execution(action["type"])
                     
                     # Error Correction Loop:
                     # If executor returns an explicit message (like "I couldn't find that app"),
@@ -448,34 +528,105 @@ class YukiOrchestrator:
 
     async def _await_turn_cleanup(self, synth_task, playback_task, turn_id: str):
         """Background cleanup for a completed turn's audio tasks."""
-        await synth_task
-        await playback_task
+        try:
+            # Shield worker checks to prevent re-await errors
+            if synth_task and not synth_task.done():
+                await synth_task
+            if playback_task and not playback_task.done():
+                await playback_task
+        except asyncio.CancelledError:
+            logger.debug(f"[ORCHESTRATOR] Turn {turn_id} workers were cancelled.")
+        except Exception as e:
+            logger.error(f"[ORCHESTRATOR] Cleanup failure for {turn_id}: {e}")
+        finally:
+            # Emitting these here ensures visually that Yuki stays 'speaking' 
+            # until the audio ends, even though the Thinking Lock was released early.
+            self._active_since = time.time()
+            self._emit("turn_completed", turn_id=turn_id)
+            self._emit("listening") 
+
+            # Clear global references if THEY are the tasks that just finished
+            if self._synth_task == synth_task: self._synth_task = None
+            if self._playback_task == playback_task: self._playback_task = None
+
+            if not self.is_verifying_interruption and not self.is_speaking:
+                self.stop_playback_event.clear()
+            
+            logger.debug(f"Turn {turn_id} cleanup complete.")
+
+    def _get_acknowledgment(self) -> str:
+        """Returns a sophisticated, randomized professional acknowledgment."""
+        import random
+        hour = time.localtime().tm_hour
         
-        # Emitting these here ensures visually that Yuki stays 'speaking' 
-        # until the audio ends, even though the Thinking Lock was released early.
-        self.mode = "idle"
-        self._emit("turn_completed", turn_id=turn_id)
-        self._emit("idle", turn_id=turn_id)
+        # J.A.R.V.I.S. / F.R.I.D.A.Y. inspired banks
+        if 5 <= hour < 12:
+            morning_extra = ["The morning looks promising, Sir. ", "Starting the day, Sir? ", ""]
+            bank = [f"{random.choice(morning_extra)}Listening.", "Online and ready, Sir.", "At your service.", "Yes, Sir?"]
+        elif 22 <= hour or hour < 5:
+            night_extra = ["Still working, Sir? ", "The world is quiet, Sir. ", ""]
+            bank = [f"{random.choice(night_extra)}I'm here.", "Working late, Sir?", "Standing by.", "Yes, Sir?"]
+        else:
+            bank = ["At your service, Sir.", "Listening, Sir.", "Online and ready.", "Yes, Sir?", "Standing by.", "Always here, Sir."]
         
-        logger.debug(f"Turn {turn_id} cleanup complete.")
+        return random.choice(bank)
+
+    def _get_verification_phrase(self) -> str:
+        """Returns a polite query to clarify if the user was interrupting intentionally."""
+        import random
+        bank = [
+            "Sir, were you saying something?",
+            "I'm sorry, Sir, did you have a request?",
+            "Excuse me, Sir, did you need me?",
+            "Sir, did you wish to interrupt?",
+            "My apologies, Sir, I thought I heard you speak."
+        ]
+        return random.choice(bank)
+
+    def _get_current_timeout(self) -> float:
+        """Returns either standard timeout or an extended one if Yuki asked a question."""
+        base = self.active_mode_timeout_sec
+        if getattr(self, "_last_was_question", False):
+            # Give significantly more time for answering a question (e.g. 20s)
+            return base * 2.5 
+        return base
+
 
     def _extract_inline_command(self, transcript: str) -> str:
-        """Return text after wake phrase, or empty string when user said only wake word."""
+        """
+        Human-grade sanitation: Strips ALL instances of any wake-word plus 
+        any leading phonetic stutters or punctuation.
+        """
         if not transcript:
             return ""
 
-        lowered = transcript.lower()
+        # 1. Phonetic De-stuttering (removes consecutive duplicate words like "Yuki Yuki" or "Hey Hey")
+        words = transcript.split()
+        if not words: return ""
+        
+        clean_words = [words[0]]
+        for w in words[1:]:
+            if w.lower() != clean_words[-1].lower():
+                clean_words.append(w)
+        
+        sanitized = " ".join(clean_words)
+        lowered = sanitized.lower()
+        
+        # 2. Aggressive Multi-Wake Stripping
         wake_words = sorted(self.wake_detector.wake_words, key=len, reverse=True)
-
-        for wake in wake_words:
-            idx = lowered.find(wake)
-            if idx == -1:
-                continue
-            tail = transcript[idx + len(wake):]
-            cleaned = re.sub(r"^[\s,.:;!?\-]+", "", tail).strip()
-            return cleaned
-
-        return ""
+        
+        # Strip all occurrences of wake words from the start of the string
+        changed = True
+        while changed:
+            changed = False
+            for wake in wake_words:
+                if lowered.startswith(wake.lower()):
+                    sanitized = sanitized[len(wake):].strip(",. ")
+                    lowered = sanitized.lower()
+                    changed = True
+                    break
+        
+        return sanitized.strip()
 
     def _ensure_mixer(self):
         """Initialize pygame mixer with universal standard settings (44.1kHz Stereo)."""
@@ -611,30 +762,31 @@ class YukiOrchestrator:
         Main entry point for background system alerts.
         Ensures thread-safe UI state transitions and speech.
         """
-        turn_id = "proactive-alert"
-        try:
-            # 1. Start Alert (UI)
-            self._emit("speaking", turn_id=turn_id)
-            self._emit("response", turn_id=turn_id, text=f"⚠️ {message}")
-            
-            # 2. Voice Alert
-            from backend.speech import synthesis as cloud_tts
-            if self.use_elevenlabs_tts:
-                path = await cloud_tts.synthesize_to_file_async(message)
-                if path:
-                    await self._play_file_with_interrupt(path)
-                    try: os.unlink(path)
-                    except: pass
+        async with self._proactive_lock:
+            turn_id = "proactive-alert"
+            try:
+                # 1. Start Alert (UI)
+                self._emit("speaking", turn_id=turn_id)
+                self._emit("response", turn_id=turn_id, text=f"⚠️ {message}")
+                
+                # 2. Voice Alert
+                from backend.speech import synthesis as cloud_tts
+                if self.use_elevenlabs_tts:
+                    path = await cloud_tts.synthesize_to_file_async(message)
+                    if path:
+                        await self._play_file_with_interrupt(path)
+                        try: os.unlink(path)
+                        except: pass
+                    else:
+                        await self._speak_local_with_interrupt(message, turn_id=turn_id)
                 else:
                     await self._speak_local_with_interrupt(message, turn_id=turn_id)
-            else:
-                await self._speak_local_with_interrupt(message, turn_id=turn_id)
-        except Exception as e:
-            logger.error(f"[ORCHESTRATOR] Proactive alert failed: {e}")
-        finally:
-            # 3. Cleanup Alert (UI)
-            self._emit("idle", turn_id=turn_id)
-            logger.info(f"[PROACTIVE] Alert finished: {message[:30]}...")
+            except Exception as e:
+                logger.error(f"[ORCHESTRATOR] Proactive alert failed: {e}")
+            finally:
+                # 3. Cleanup Alert (UI)
+                self._emit("idle", turn_id=turn_id)
+                logger.info(f"[PROACTIVE] Alert finished: {message[:30]}...")
 
     async def _speak_alert(self, text: str, turn_id: str = "system-alert"):
         """Legacy path for immediate non-proactive alerts."""

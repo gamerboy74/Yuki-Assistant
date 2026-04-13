@@ -14,7 +14,7 @@ interface YukiAPI {
   sendUIReady: () => void;
   saveHistory: (messages: any[]) => void;
   onLoadHistory: (callback: (messages: any[]) => void) => void;
-  removeStateListener: () => void;
+  removeStateListener: (callback?: (msg: any) => void) => void;
   saveSettings: (payload: any) => void;
   getSettings: () => Promise<any>;
   purgeMemory: () => void;

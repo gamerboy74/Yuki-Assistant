@@ -36,10 +36,17 @@ class Plugin(ABC):
         props = {}
         required = []
         for param_name, param_info in self.parameters.items():
-            props[param_name] = {
+            prop = {
                 "type": param_info.get("type", "string"),
                 "description": param_info.get("description", ""),
             }
+            if "enum" in param_info:
+                prop["enum"] = param_info["enum"]
+            if "items" in param_info:
+                prop["items"] = param_info["items"]
+            
+            props[param_name] = prop
+            
             if param_info.get("required", False):
                 required.append(param_name)
 

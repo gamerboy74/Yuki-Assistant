@@ -53,3 +53,4 @@ backend/data/
 build/
 
 scratch/
+.cache

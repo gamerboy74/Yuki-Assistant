@@ -69,16 +69,29 @@ class FilePlugin(Plugin):
     }
 
     def _safe(self, path_str: str) -> Path:
-        """Resolve path and verify it is under %USERPROFILE%."""
-        user_home = Path(os.path.expanduser("~")).resolve()
+        """Resolve path and verify it is under allowed roots (Home or OneDrive)."""
         if not path_str:
             raise ValueError("Empty path provided")
+
+        user_home = Path(os.path.expanduser("~")).resolve()
         p = Path(path_str).resolve()
-        # Allow paths under user home or OneDrive
-        if user_home not in p.parents and p != user_home:
-            # Check for OneDrive variant
-            if "OneDrive" not in str(p):
-                 raise PermissionError(f"Access denied: '{p}' is outside your home directory.")
+
+        # Define allowed root directories
+        allowed_roots = [user_home]
+        
+        # Resolve OneDrive paths from environment
+        for env_var in ["OneDrive", "OneDriveConsumer", "OneDriveCommercial"]:
+            val = os.environ.get(env_var)
+            if val:
+                allowed_roots.append(Path(val).resolve())
+
+        # Strict containment check
+        is_safe = any(p == root or root in p.parents for root in allowed_roots)
+
+        if not is_safe:
+            logger.warning(f"[SECURITY] Denied access outside allowed roots: {p}")
+            raise PermissionError(f"Access denied: '{p}' is outside allowed directories.")
+            
         return p
 
     def execute(self, operation: str = "", **params) -> str:
@@ -102,6 +115,11 @@ class FilePlugin(Plugin):
             elif operation == "delete":
                 if not src: return "No path specified for delete."
                 if src.is_dir(): return "I cannot delete directories for safety. Please do it manually."
+                
+                # Safety Sentinel Gate
+                if not params.get("confirm"):
+                    return f"Sir, I require confirmation to delete {src.name}. This action is irreversible."
+                    
                 src.unlink()
                 return f"Deleted file {src.name}."
             elif operation == "move_pattern" and pattern:
@@ -160,4 +178,25 @@ class DesignWebPagePlugin(FilePlugin):
     def execute(self, content: str = "", **params) -> str:
         params["content"] = content
         params["operation"] = "write"
-        return super()._write_file(params)
+class OpenFilePlugin(FilePlugin):
+    name = "open_file"
+    description = "Open a local file or folder using the default Windows handler."
+    parameters = {
+        "path": {
+            "type": "string",
+            "description": "Full path to the file or folder to open",
+            "required": True,
+        }
+    }
+
+    def execute(self, path: str = "", **_) -> str:
+        if not path:
+            return "Please provide a file path to open."
+            
+        try:
+            safe_path = self._safe(path)
+            os.startfile(safe_path)
+            return f"Opening {safe_path.name}, Sir."
+        except Exception as e:
+            logger.error(f"[OPEN_FILE] Error: {e}")
+            return f"Failed to open file: {str(e)[:100]}"

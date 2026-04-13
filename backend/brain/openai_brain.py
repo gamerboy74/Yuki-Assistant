@@ -26,6 +26,8 @@ from backend.brain.shared import (
     get_openai_messages,
 )
 from backend.brain.tools import get_tools_for_query
+from backend.brain.reasoning import reason, track_execution
+from backend import memory as mem
 from backend.config import cfg
 
 logger = get_logger(__name__)
@@ -72,12 +74,22 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
         return
 
     client = AsyncOpenAI(api_key=api_key)
-    add_user_message(transcript)
+    
+    # ── Reasoning Layer (JARVIS-style pre-processing) ──────────────────────────
+    user_data    = mem.get_user()
+    all_memories = [m for m in mem.get_all_memories()]
+    result = reason(
+        transcript,
+        all_memories,
+        user_location=user_data.get("location", ""),
+    )
+    add_user_message(result.enriched_transcript)
 
     system_content = build_system_content()
 
     # ── Chat-only fast path: skip tools for conversational queries ─────────
     # Saves ~2,000 tokens by not sending any tool schemas.
+    # Keep transcript clean for the conversational check
     use_tools = not is_conversational(transcript)
 
     # ── Selective tool loading ────────────────────────────────────────────
@@ -89,11 +101,16 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
     for step in range(MAX_AGENT_STEPS):
         messages = get_openai_messages(system_content)
         
-        # ── Injection Point: Dynamic Context (Time/Memory) ─────────────────
-        # Insert at index 1 (after static system prompt) to keep prefix cached.
+        # ── Neural Economy: Caching-Friendly Context Injection ─────────────────
+        # Inject context into the user's message instead of a prefix message.
+        # This keeps the system prompt at index 0 static for cache hits.
         dynamic = build_dynamic_context()
         if dynamic:
-            messages.insert(1, {"role": "system", "content": f"[TURN_CONTEXT]\n{dynamic}"})
+            # Find the most recent user message and prepend the context
+            for msg in reversed(messages):
+                if msg["role"] == "user":
+                    msg["content"] = f"[TURN_CONTEXT]\n{dynamic}\n\n{msg['content']}"
+                    break
 
         create_kwargs = {
             "model": active_model,
@@ -120,11 +137,14 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
         async for chunk in stream:
             # Handle Usage (OpenAI 1.26.0+ with stream_options)
             if hasattr(chunk, "usage") and chunk.usage:
+                details = getattr(chunk.usage, "prompt_tokens_details", None)
+                cached = getattr(details, "cached_tokens", 0) if details else 0
                 yield {
                     "type": "usage",
                     "model": active_model,
                     "input": chunk.usage.prompt_tokens,
-                    "output": chunk.usage.completion_tokens
+                    "output": chunk.usage.completion_tokens,
+                    "cached": cached
                 }
 
             if not chunk.choices:
@@ -193,6 +213,9 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
                     args = {}
                 res = await asyncio.to_thread(execute_plugin, tc["name"], args)
                 executed_tool_calls[signature] = res
+                
+                # Behavioral Learning: Track successful execution to learn user patterns
+                track_execution(tc["name"])
 
             tool_result_msgs.append({
                 "role": "tool",
@@ -203,7 +226,6 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
 
             # ── Sentient Auto-Learning ──
             if tc["name"] in ["notepad", "reminder", "set_reminder"] and "saved" in str(res).lower():
-                from backend import memory as mem
                 import json
                 try: 
                     args = json.loads(tc["arguments"])

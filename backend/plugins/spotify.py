@@ -6,6 +6,7 @@ import subprocess
 import threading
 import time
 from backend.plugins._base import Plugin
+from backend import memory as mem
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -37,7 +38,7 @@ class SpotifyPlugin(Plugin):
         # Strategy A: scrape DuckDuckGo for a direct track URI
         try:
             import urllib.request
-            url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote('site:open.spotify.com/track ' + query)}"
+            url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query + ' spotify song')}"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
             html = urllib.request.urlopen(req, timeout=5).read().decode("utf-8")
             m = re.search(r"open\.spotify\.com/track/([a-zA-Z0-9]{22})", html)
@@ -50,10 +51,12 @@ class SpotifyPlugin(Plugin):
             if track_uri:
                 os.startfile(track_uri)
                 self._auto_play_track()
+                mem.set("last_played_track", query)
                 return f"Playing {query} on Spotify."
             else:
                 os.startfile(f"spotify:search:{encoded}")
                 self._auto_play_search()
+                mem.set("last_played_track", query)
                 return f"Searching Spotify for {query} and attempting auto-play."
         except Exception as e:
             logger.error(f"Spotify startfile error: {e}")

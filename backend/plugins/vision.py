@@ -6,7 +6,7 @@ from backend.utils.logger import get_logger
 logger = get_logger(__name__)
 
 class VisionPlugin(Plugin):
-    name = "analyze_screen"
+    name = ""
     description = "Analyze current screen or OCR/Find coordinates."
     parameters = {
         "operation": {
@@ -26,6 +26,25 @@ class VisionPlugin(Plugin):
         }
     }
 
+    _client = None
+
+    def _get_client(self):
+        """Persistent client handle for Gemini Vision."""
+        if self._client is None:
+            try:
+                from google import genai
+                from backend.config import cfg
+                key_info = cfg.get("gemini", {}).get("google_ai_studio", {})
+                api_key = key_info.get("api_key") or os.environ.get("GOOGLE_API_KEY")
+                if not api_key:
+                    return None
+                from google.genai import types
+                self._client = genai.Client(api_key=api_key)
+            except ImportError as e:
+                logger.error(f"[VISION] Required library missing: {e}")
+                return None
+        return self._client
+
     def execute(self, operation: str = "analyze", query: str = "Describe the screen.", find_coordinates_of: str = "", **_) -> str:
         if operation == "screenshot":
             return self._take_screenshot()
@@ -44,14 +63,12 @@ class VisionPlugin(Plugin):
             return f"Screenshot failed: {e}"
 
     def _analyze_screen(self, query: str, find_coordinates_of: str) -> str:
-        from backend.config import cfg
-        api_key = cfg.get("gemini", {}).get("google_api_key") or os.environ.get("GOOGLE_API_KEY")
-        if not api_key:
-            return "Vision requires the GOOGLE_API_KEY."
+        client = self._get_client()
+        if not client:
+            return "Vision requires the GOOGLE_API_KEY and 'google-genai' library."
 
         try:
             from PIL import ImageGrab
-            from google import genai
             from google.genai import types
         except ImportError as e:
             return f"Required library missing: {e}."
@@ -72,8 +89,8 @@ class VisionPlugin(Plugin):
             screenshot.save(buffered, format="JPEG", quality=75)
             img_bytes = buffered.getvalue()
 
-            # 3. Analyze with Gemini 2.0 Flash
-            client = genai.Client(api_key=api_key)
+            # 3. Analyze with Gemini 3 Flash
+            # Client is already initialized in _get_client()
             
             vision_query = query
             if find_coordinates_of:
@@ -86,7 +103,7 @@ class VisionPlugin(Plugin):
                 )
 
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model="gemini-3-flash-preview",
                 contents=[
                     types.Content(
                         role="user",

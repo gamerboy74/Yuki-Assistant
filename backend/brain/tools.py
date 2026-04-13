@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 # Core tools are ALWAYS included (~300 tokens overhead)
 # These are genuinely useful on every turn.
 CORE_PLUGINS = [
-    "system_info", "open_app", "close_app", "search_internet", "get_weather",
+    "system_info", "open_app", "close_app", "get_weather",
 ]
 
 # Keyword → additional plugin names to include
@@ -45,7 +45,10 @@ _KEYWORD_ROUTES: list[tuple[re.Pattern, list[str]]] = [
      ["set_reminder"]),
 
     (re.compile(r"news|headline|latest", re.I),
-     ["latest_news"]),
+     ["latest_news", "search_internet"]),
+
+    (re.compile(r"search|find|look up|what is|who is|google|internet", re.I),
+     ["search_internet"]),
 
     (re.compile(r"design|webpage|web\s*page|html|tailwind|ui|landing\s*page|banao|page|type|write|keyboard|likho", re.I),
      ["design_web_page", "write_file", "type_text"]),
@@ -56,15 +59,21 @@ _KEYWORD_ROUTES: list[tuple[re.Pattern, list[str]]] = [
     (re.compile(r"fetch|http|api|url|download", re.I),
      ["http_get"]),
 
-    (re.compile(r"chrome|browser|search.*in|read.*page|scroll|navigate|open.*url|click", re.I),
-     ["browser_scroll", "browser_click", "read_active_tab", "browser_navigate"]),
+    (re.compile(r"chrome|browser|search.*in|read.*page|scroll|navigate|open|click|.*\.(com|net|to|org|io|in|edu|gov)", re.I),
+     ["browser_scroll", "browser_click", "read_active_tab", "browser_navigate", "search_internet"]),
 
     (re.compile(r"my\s*(name|info|preference|detail|fact)", re.I),
      ["get_user_info"]),
      
-    (re.compile(r"spotify|youtube|music|song|artist|play.*music|video|watch", re.I),
-     ["play_spotify", "play_youtube"]),
+    (re.compile(r"remember|save.*fact|keep.*mind|store.*memory", re.I),
+     ["save_memory"]),
      
+    (re.compile(r"recall|find.*memory|search.*memory|what.*i.*told|what.*did.*i.*say", re.I),
+     ["recall_memory"]),
+      
+    (re.compile(r"spotify|youtube|music|song|artist|play.*music|video|watch|anime", re.I),
+     ["play_spotify", "play_youtube", "browser_navigate", "search_internet"]),
+      
     (re.compile(r"vision|see|look|describe|what.*is.*this|camera", re.I),
      ["analyze_screen"]),
 ]
@@ -88,9 +97,9 @@ def get_tools_for_query(transcript: str) -> list[dict]:
     # Build function schemas
     tools = []
     for name in selected_names:
-        plugin_cls = all_plugins.get(name)
-        if plugin_cls:
-            tools.append(_build_tool_schema(plugin_cls))
+        plugin = all_plugins.get(name)
+        if plugin:
+            tools.append(plugin.to_tool_schema())
 
     logger.debug(f"[TOOLS] Dynamically selected {len(tools)} tools for query.")
     return tools
@@ -98,39 +107,5 @@ def get_tools_for_query(transcript: str) -> list[dict]:
 def get_all_tools() -> list[dict]:
     """Return all available plugins as tools."""
     all_plugins = get_all_plugins()
-    return [_build_tool_schema(p) for p in all_plugins.values()]
+    return [p.to_tool_schema() for p in all_plugins.values()]
 
-def _build_tool_schema(plugin_obj: Any) -> dict:
-    """Transform a Plugin class or instance into an OpenAI/Gemini function schema."""
-    # Ensure name and description exist
-    # Some plugins might be instances, others classes
-    name = getattr(plugin_obj, "name", None)
-    if not name:
-        name = getattr(plugin_obj, "__name__", type(plugin_obj).__name__).lower()
-    
-    desc = getattr(plugin_obj, "description", "No description provided.")
-    params = getattr(plugin_obj, "parameters", {})
-
-    # Extract required fields from parameters dict
-    required = [k for k, v in params.items() if v.get("required", False)]
-    
-    # Strip the 'required' key from the properties to match JSON schema spec exactly
-    properties = {}
-    for k, v in params.items():
-        prop = dict(v)
-        if "required" in prop:
-            del prop["required"]
-        properties[k] = prop
-
-    return {
-        "type": "function",
-        "function": {
-            "name": name,
-            "description": desc,
-            "parameters": {
-                "type": "object",
-                "properties": properties,
-                "required": required,
-            },
-        },
-    }

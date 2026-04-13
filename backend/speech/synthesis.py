@@ -14,10 +14,17 @@ import uuid
 import time
 from backend.utils.logger import get_logger
 from backend.config import cfg
+from backend.speech.synthesis_kokoro import KokoroEngine
 
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 
 logger = get_logger(__name__)
+
+# ── Global Engines & State ───────────────────────────────────────────────────
+_kokoro_engine = None
+_el_circuit_broken = False  # If True, ElevenLabs is skipped for this session
+_el_broken_expiry = 0       # Timestamp to retry EL
+_phrase_cache = {}         # {hash: file_path} mapping for frequent phrases
 
 # ── Config ────────────────────────────────────────────────────────────────────
 def _get_elevenlabs_creds():
@@ -276,55 +283,123 @@ async def synthesize_to_file_async(text: str, voice_id: str | None = None, provi
     text = _normalize_text(text)
     tmp_path = os.path.join(tempfile.gettempdir(), f"yuki_tts_{uuid.uuid4().hex}.mp3")
 
+    # ── 0. Phrase Cache Check ──
+    import hashlib
+    text_hash = hashlib.md5(text.encode()).hexdigest()
+    
+    # We only cache short, common system phrases to avoid bloating tempdir
+    is_common = len(text) < 100
+    cache_dir = os.path.join(tempfile.gettempdir(), "yuki_audio_cache")
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir, exist_ok=True)
+    
+    cached_path = os.path.join(cache_dir, f"{text_hash}.mp3")
+    if is_common and os.path.exists(cached_path):
+        # logger.debug(f"Audio cache hit for: {text[:20]}...")
+        return cached_path
+
     audio_ready = False
     active_provider = (provider or cfg.get("tts", {}).get("provider", "elevenlabs")).lower()
 
+    # ── 1. ElevenLabs (with Circuit Breaker) ──
+    global _el_circuit_broken, _el_broken_expiry
     if active_provider == "elevenlabs":
-        api_key, cfg_voice_id = _get_elevenlabs_creds()
-        # Use override voice_id if provided, else from config
-        target_voice_id = voice_id or cfg_voice_id
-        
-        if api_key and target_voice_id:
-            loop = asyncio.get_event_loop()
-            # We need to wrap _speak_elevenlabs to use the override voice_id
-            def _speak_el_custom():
-                import requests
-                url = f"https://api.elevenlabs.io/v1/text-to-speech/{target_voice_id}"
-                payload = {
-                    "text": text,
-                    "model_id": "eleven_multilingual_v2",
-                    "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
-                }
-                headers = {"xi-api-key": api_key, "Content-Type": "application/json", "Accept": "audio/mpeg"}
-                resp = requests.post(url, json=payload, headers=headers, timeout=(5, 10))
-                resp.raise_for_status()
-                with open(tmp_path, "wb") as f:
-                    f.write(resp.content)
-                return True
+        if _el_circuit_broken and time.time() < _el_broken_expiry:
+            logger.debug("ElevenLabs circuit broken — skipping.")
+        else:
+            api_key, cfg_voice_id = _get_elevenlabs_creds()
+            target_voice_id = voice_id or cfg_voice_id
+            
+            if api_key and target_voice_id:
+                loop = asyncio.get_event_loop()
+                def _speak_el_custom():
+                    import requests
+                    url = f"https://api.elevenlabs.io/v1/text-to-speech/{target_voice_id}"
+                    payload = {
+                        "text": text,
+                        "model_id": "eleven_multilingual_v2",
+                        "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+                    }
+                    headers = {"xi-api-key": api_key, "Content-Type": "application/json", "Accept": "audio/mpeg"}
+                    resp = requests.post(url, json=payload, headers=headers, timeout=(5, 10))
+                    
+                    if resp.status_code in (401, 403, 429):
+                        # Break the circuit for 10 minutes if auth or rate limit error
+                        global _el_circuit_broken, _el_broken_expiry
+                        _el_circuit_broken = True
+                        _el_broken_expiry = time.time() + 600 
+                        logger.error(f"ElevenLabs fatal error {resp.status_code}. Circuit broken for 10m.")
+                        return False
+                    
+                    resp.raise_for_status()
+                    with open(tmp_path, "wb") as f:
+                        f.write(resp.content)
+                    return True
 
-            try:
-                audio_ready = await loop.run_in_executor(None, _speak_el_custom)
-            except Exception as e:
-                logger.warning(f"ElevenLabs override synthesis failed: {e}")
+                try:
+                    audio_ready = await loop.run_in_executor(None, _speak_el_custom)
+                except Exception as e:
+                    logger.warning(f"ElevenLabs synthesis failed: {e}")
+
+    if not audio_ready and active_provider == "kokoro":
+        try:
+            global _kokoro_engine
+            if _kokoro_engine is None:
+                _kokoro_engine = KokoroEngine()
+                await _kokoro_engine.load()
+            
+            target_voice = voice_id or "af_heart"
+            # We use soundfile to save the generated PCM to a WAV/MP3 compatible format
+            import soundfile as sf
+            import numpy as np
+            
+            chunks = []
+            async for chunk in _kokoro_engine.generate_audio_stream(text, voice=target_voice):
+                chunks.append(np.frombuffer(chunk, dtype=np.int16))
+            
+            if chunks:
+                full_audio = np.concatenate(chunks)
+                # Kokoro outputs at 24000Hz (standard for 82M)
+                # synthesis.py's mixer is at 44100Hz, but pygame handles sample rate during load.
+                # To be safe, we save as a high-quality WAV.
+                sf.write(tmp_path, full_audio, 24000)
+                audio_ready = True
+                logger.info(f"Kokoro synthesis successful with voice: {target_voice}")
+        except Exception as e:
+            logger.error(f"Kokoro synthesis failed: {e}")
 
     if not audio_ready:
         # Fallback (or direct) to edge-tts
         try:
             import edge_tts
-            # If the current voice_id looks like an ElevenLabs ID (random chars, no hyphens),
-            # we should ignore it and use the default edge-tts voice instead.
-            is_edge_voice = voice_id and "-" in voice_id
-            target_voice = voice_id if is_edge_voice else _get_edge_voice()
+            
+            # ── Neural Cleanup: Ensure we don't pass ElevenLabs IDs to Edge-TTS ──
+            # Edge-TTS voices always contain hyphens (e.g., 'en-US-GuyNeural').
+            # ElevenLabs IDs are alphanumeric (e.g., 'cgSgspJ2msm6clMCkdW9').
+            def is_edge_format(v: str) -> bool:
+                return v and "-" in v
+            
+            # If the user-selected voice is NOT an Edge voice, use a safe default for fallback.
+            config_voice = _get_edge_voice()
+            target_voice = voice_id if is_edge_format(voice_id) else (config_voice if is_edge_format(config_voice) else "en-US-AvaMultilingualNeural")
             
             communicate = edge_tts.Communicate(text, voice=target_voice)
             await communicate.save(tmp_path)
             if os.path.getsize(tmp_path) > 0:
                 audio_ready = True
+                logger.info(f"Synthesis fallback successful using: {target_voice}")
         except Exception as e:
             logger.warning(f"Synthesis fallback failed: {e}")
 
     if audio_ready:
+        # If successfully synthesized a common phrase, cache it for next time
+        if is_common and not os.path.exists(cached_path):
+            try:
+                import shutil
+                shutil.copy(tmp_path, cached_path)
+            except: pass
         return tmp_path
+    
     return None
 
 async def _speak_async(text: str, stop_check=None) -> None:
@@ -357,31 +432,44 @@ async def get_voices_async():
     """Retrieve list of available Microsoft Neural and ElevenLabs voices."""
     combined_voices = []
     
-    # 1. Edge-TTS Voices
+    # 1. Edge-TTS Voices (Curated "Elite" Set)
     try:
         import edge_tts
-        voices = await edge_tts.VoicesManager.create()
-        # Find global selection
-        locales = ["en-US", "en-GB", "en-IN", "hi-IN", "es-ES", "es-MX", "fr-FR", "de-DE", "ja-JP", "pt-BR", "it-IT", "ru-RU", "ko-KR", "zh-CN"]
+        voices_manager = await edge_tts.VoicesManager.create()
+        
+        # We only keep the highest fidelity multilingual and local specialty voices
+        # en-US-Ava and en-US-Andrew are the current gold standard for Microsoft neural.
+        elite_voice_ids = [
+            "en-US-AvaMultilingualNeural",
+            "en-US-AndrewMultilingualNeural",
+            "en-US-EmmaMultilingualNeural",
+            "en-US-BrianMultilingualNeural",
+            "en-GB-SoniaNeural",
+            "en-GB-RyanNeural",
+            "en-IN-NeerjaNeural",
+            "hi-IN-SwaraNeural",
+            "hi-IN-MadhurNeural",
+            "ja-JP-NanamiNeural",
+            "zh-CN-XiaoxiaoNeural"
+        ]
+        
         v_list = []
-        for loc in locales:
-            v_list += voices.find(Locale=loc)
+        for vid in elite_voice_ids:
+            # find by ShortName
+            matches = [v for v in voices_manager.voices if v["ShortName"] == vid]
+            if matches:
+                v = matches[0]
+                v_list.append({
+                    "id": v["ShortName"],
+                    "name": (v["FriendlyName"].split("-")[1] if "-" in v["FriendlyName"] else v["FriendlyName"]).strip(),
+                    "gender": v["Gender"],
+                    "locale": v["Locale"],
+                    "provider": "edge-tts",
+                    "isPremium": False,
+                    "isMultilingual": True if "Multilingual" in v["ShortName"] else False
+                })
         
-        # Sort by locale then name
-        v_list.sort(key=lambda x: (x["Locale"], x["FriendlyName"]))
-        
-        combined_voices.extend([
-            {
-                "id": v["ShortName"],
-                "name": (v["FriendlyName"].split("-")[1] if "-" in v["FriendlyName"] else v["FriendlyName"]).strip(),
-                "gender": v["Gender"],
-                "locale": v["Locale"],
-                "provider": "edge-tts",
-                "isPremium": False,
-                "isMultilingual": False
-            }
-            for v in v_list
-        ])
+        combined_voices.extend(v_list)
     except Exception as e:
         logger.debug(f"edge-tts voice listing failed: {e}")
 
@@ -415,6 +503,25 @@ async def get_voices_async():
                     })
     except Exception as e:
         logger.debug(f"ElevenLabs voice listing failed: {e}")
+
+    # 3. Kokoro Voices (Local Neural)
+    try:
+        # Static curated list of high-quality Kokoro-82M voices
+        kokoro_voices = [
+            {"id": "af_heart", "name": "Heart", "gender": "Female", "locale": "en-US", "provider": "kokoro", "isPremium": False, "isMultilingual": True},
+            {"id": "af_bella", "name": "Bella", "gender": "Female", "locale": "en-US", "provider": "kokoro", "isPremium": False, "isMultilingual": True},
+            {"id": "af_nicole", "name": "Nicole", "gender": "Female", "locale": "en-US", "provider": "kokoro", "isPremium": False, "isMultilingual": True},
+            {"id": "af_sarah", "name": "Sarah", "gender": "Female", "locale": "en-US", "provider": "kokoro", "isPremium": False, "isMultilingual": True},
+            {"id": "am_adam", "name": "Adam", "gender": "Male", "locale": "en-US", "provider": "kokoro", "isPremium": False, "isMultilingual": True},
+            {"id": "am_michael", "name": "Michael", "gender": "Male", "locale": "en-US", "provider": "kokoro", "isPremium": False, "isMultilingual": True},
+            {"id": "bf_emma", "name": "Emma", "gender": "Female", "locale": "en-GB", "provider": "kokoro", "isPremium": False, "isMultilingual": True},
+            {"id": "bf_isabella", "name": "Isabella", "gender": "Female", "locale": "en-GB", "provider": "kokoro", "isPremium": False, "isMultilingual": True},
+            {"id": "bm_george", "name": "George", "gender": "Male", "locale": "en-GB", "provider": "kokoro", "isPremium": False, "isMultilingual": True},
+            {"id": "bm_lewis", "name": "Lewis", "gender": "Male", "locale": "en-GB", "provider": "kokoro", "isPremium": False, "isMultilingual": True},
+        ]
+        combined_voices.extend(kokoro_voices)
+    except Exception as e:
+        logger.debug(f"Kokoro voice listing failed: {e}")
 
     return combined_voices
 

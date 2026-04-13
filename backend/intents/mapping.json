@@ -16,7 +16,16 @@
   },
   "play_spotify": {
     "patterns": [
-      "play spotify",
+      "play (?P<query>.+) on spotify",
+      "spotify play (?P<query>.+)",
+      "pause spotify",
+      "resume spotify",
+      "next song",
+      "skip song",
+      "previous song",
+      "spotify volume up",
+      "spotify volume down",
+      "mute spotify",
       "open spotify"
     ]
   },

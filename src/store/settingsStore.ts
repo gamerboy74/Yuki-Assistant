@@ -22,6 +22,9 @@ interface SettingsState {
   // Neural (AI)
   geminiModel: string;
   geminiFallback: string;
+  geminiProvider: 'google_ai_studio' | 'vertex_ai';
+  vertexProjectId: string;
+  vertexLocation: string;
   useLiteFallback: boolean;
   openaiModel: string;
   ollamaModel: string;
@@ -43,6 +46,7 @@ interface SettingsState {
 
   // Secrets
   googleApiKey: string;
+  vertexKeyString: string;
   openaiApiKey: string;
   elApiKey: string;
   elVoiceId: string;
@@ -58,6 +62,7 @@ interface SettingsState {
   voiceSearch: string;
   genderFilter: 'female' | 'male';
   previewing: string | null;
+  availableGeminiModels: string[];
 
   // Actions
   setTab: (tab: string) => void;
@@ -84,8 +89,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   maxRecordSecs: 12,
   speechThold: 0.65,
 
-  geminiModel: 'gemini-2.0-flash',
+  geminiModel: 'gemini-2.5-flash',
   geminiFallback: 'gemini-2.5-flash-lite',
+  geminiProvider: 'google_ai_studio',
+  vertexProjectId: '',
+  vertexLocation: 'us-central1',
   useLiteFallback: true,
   openaiModel: 'gpt-4o-mini',
   ollamaModel: 'gemma3:4b',
@@ -105,6 +113,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   resamplingHq: true,
 
   googleApiKey: '',
+  vertexKeyString: '',
   openaiApiKey: '',
   elApiKey: '',
   elVoiceId: '',
@@ -114,13 +123,31 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   browserAutoLaunch: true,
   browserCdpPort: 9222,
 
-  availableVoices: [],
+  availableVoices: JSON.parse(localStorage.getItem('yuki_cached_voices') || '[]'),
+  availableGeminiModels: JSON.parse(localStorage.getItem('yuki_cached_models') || '[]').length > 0 
+    ? JSON.parse(localStorage.getItem('yuki_cached_models')!)
+    : [
+        "gemini-3.1-pro-preview",
+        "gemini-3.1-flash-preview",
+        "gemini-3.1-flash-lite-preview",
+        "gemini-3.1-flash-live-preview",
+        "gemini-3-flash-preview",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash"
+      ],
   voiceSearch: '',
   genderFilter: 'female',
   previewing: null,
 
   setTab: (activeTab) => set({ activeTab }),
-  updateSetting: (key, value) => set({ [key]: value } as any),
+  updateSetting: (key, value) => {
+    set({ [key]: value } as any);
+    if (key === 'availableGeminiModels') {
+      localStorage.setItem('yuki_cached_models', JSON.stringify(value));
+    }
+  },
 
   loadConfig: async () => {
     try {
@@ -145,8 +172,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         silenceThold: data.whisper?.silence_threshold || 300,
         silenceTime: data.whisper?.silence_timeout || 1.2,
         maxRecordSecs: data.whisper?.max_record_secs ?? 12,
-        geminiModel: data.gemini?.model || 'gemini-2.0-flash',
+        geminiModel: data.gemini?.google_ai_studio?.model || data.gemini?.model || 'gemini-2.0-flash',
         geminiFallback: data.gemini?.fallback_model || 'gemini-2.5-flash-lite',
+        geminiProvider: data.gemini?.provider || 'google_ai_studio',
+        vertexProjectId: data.gemini?.vertex_ai?.project_id || '',
+        vertexLocation: data.gemini?.vertex_ai?.location || 'us-central1',
         useLiteFallback: data.gemini?.use_lite_fallback ?? true,
         openaiModel: data.openai?.model || 'gpt-4o-mini',
         ollamaModel: data.ollama?.model || 'gemma3:4b',
@@ -164,7 +194,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         ttsSpeed: data.tts?.speed ?? 1.0,
         spatialAudio: data.tts?.spatial_audio ?? false,
         resamplingHq: data.tts?.resampling_hq ?? true,
-        googleApiKey: data.gemini?.google_api_key || '',
+        googleApiKey: data.gemini?.google_ai_studio?.api_key || data.gemini?.google_api_key || '',
+        vertexKeyString: data.gemini?.vertex_ai?.key_string || '',
         openaiApiKey: data.openai?.openai_api_key || '',
         elApiKey: data.tts?.elevenlabs_api_key || '',
         elVoiceId: data.tts?.elevenlabs_voice_id || '',
@@ -192,10 +223,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         tts_voice: s.ttsVoice
       },
       gemini: { 
-        model: s.geminiModel, 
+        google_ai_studio: {
+          api_key: s.googleApiKey,
+          model: s.geminiModel
+        },
+        vertex_ai: {
+          project_id: s.vertexProjectId,
+          location: s.vertexLocation,
+          key_string: s.vertexKeyString
+        },
+        provider: s.geminiProvider,
         fallback_model: s.geminiFallback, 
-        use_lite_fallback: s.useLiteFallback,
-        google_api_key: s.googleApiKey 
+        use_lite_fallback: s.useLiteFallback
       },
       openai: { 
         model: s.openaiModel, 
@@ -250,6 +289,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         return { availableVoices: [...state.availableVoices, ...newVoices] };
       });
     }
+    // Persist to local storage after a short delay to avoid rapid writes
+    localStorage.setItem('yuki_cached_voices', JSON.stringify(get().availableVoices));
   },
 
   purgeMemory: () => {

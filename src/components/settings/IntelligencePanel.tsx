@@ -5,9 +5,10 @@ interface IntelligencePanelProps {
   state: SettingsState['neural'];
   secrets: SettingsState['secrets'];
   onUpdate: (field: string, value: any) => void;
+  availableModels: string[];
 }
 
-export const IntelligencePanel = memo(({ state, secrets, onUpdate }: IntelligencePanelProps) => {
+export const IntelligencePanel = memo(({ state, secrets, onUpdate, availableModels }: IntelligencePanelProps) => {
   const [showGoogle, setShowGoogle] = useState(false);
   const [showOpenai, setShowOpenai] = useState(false);
 
@@ -48,33 +49,33 @@ export const IntelligencePanel = memo(({ state, secrets, onUpdate }: Intelligenc
             <div className="flex-grow space-y-6 w-full">
               <div className="flex justify-between items-center">
                 <div className="space-y-1">
-                  <h3 className="font-headline text-lg font-bold text-on-surface uppercase tracking-wide">Google Gemini Configuration</h3>
-                  <div className="flex items-center gap-2">
-                    <div className={`h-1.5 w-1.5 rounded-full ${secrets.googleApiKey ? 'bg-primary shadow-[0_0_8px_var(--md-sys-color-primary)]' : 'bg-outline-variant'}`} />
-                    <span className="font-label text-[10px] uppercase tracking-tighter text-on-surface-variant">
-                      {secrets.googleApiKey ? 'Neural Link Ready' : 'Awaiting Credential'}
-                    </span>
-                  </div>
+                  <h3 className="font-headline text-lg font-bold text-on-surface uppercase tracking-wide">Google Gemini Neural Core</h3>
                 </div>
-                <a href="https://aistudio.google.com/app/apikey" target="_blank" className="font-label text-[10px] text-primary hover:underline uppercase tracking-widest font-bold">API Console</a>
+                <a 
+                  href="https://aistudio.google.com/app/apikey" 
+                  target="_blank" 
+                  className="font-label text-[10px] text-primary hover:underline uppercase tracking-widest font-bold"
+                >
+                  AI Studio
+                </a>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-4 pt-2">
                 <div className="flex flex-wrap gap-2">
-                  {['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash-lite'].map(m => (
+                  {availableModels.map(m => (
                     <button key={m} onClick={() => onUpdate('neural.geminiModel', m)}
-                      className={`px-4 py-2 border font-mono text-[10px] transition-all ${state.geminiModel === m ? 'bg-primary border-primary text-background font-bold shadow-lg shadow-primary/20' : 'border-outline-variant/20 text-on-surface-variant hover:border-primary/50'}`}>
+                      className={`px-3 py-1.5 border font-mono text-[9px] transition-all flex items-center gap-2 ${state.geminiModel === m ? 'bg-primary border-primary text-background font-bold shadow-lg shadow-primary/20' : 'border-outline-variant/20 text-on-surface-variant hover:border-primary/50'}`}>
                       {m.toUpperCase()}
+                      {(m.includes('pro') || m.startsWith('gemini-3.')) && <span className="w-1.5 h-1.5 bg-current rounded-full animate-pulse" />}
                     </button>
                   ))}
                 </div>
-
                 <div className="relative flex items-center">
                   <input 
                     type={showGoogle ? "text" : "password"} 
                     value={secrets.googleApiKey} 
                     onChange={e => onUpdate('secrets.googleApiKey', e.target.value)} 
-                    placeholder="Paste Google AI Studio Key..."
+                    placeholder="Paste AI Studio API Key..."
                     className="w-full bg-surface-container-high/40 border border-outline-variant/10 p-4 font-mono text-xs text-on-surface focus:border-primary/50 outline-none transition-all placeholder:text-on-surface-variant/30" 
                   />
                   <button onClick={() => setShowGoogle(!showGoogle)} className="absolute right-4 text-on-surface-variant/50 hover:text-primary transition-colors">
@@ -83,7 +84,7 @@ export const IntelligencePanel = memo(({ state, secrets, onUpdate }: Intelligenc
                 </div>
                 
                 <div className="pt-2">
-                  <label className="font-label text-[9px] uppercase text-on-surface-variant font-bold block mb-2">Resilience Fallback</label>
+                  <label className="font-label text-[9px] uppercase text-on-surface-variant font-bold block mb-2">Neural Fallback Model</label>
                   <input type="text" value={state.geminiFallback} onChange={e => onUpdate('neural.geminiFallback', e.target.value)} className="w-full bg-surface-container-highest/30 border border-outline-variant/10 p-2 text-on-surface font-mono text-[10px] outline-none focus:border-primary" />
                 </div>
               </div>
@@ -115,7 +116,7 @@ export const IntelligencePanel = memo(({ state, secrets, onUpdate }: Intelligenc
 
               <div className="space-y-4">
                 <div className="flex flex-wrap gap-2">
-                  {['gpt-4o-mini', 'gpt-4o', 'o1-mini'].map(m => (
+                  {['gpt-4o-mini', 'gpt-4o'].map(m => (
                     <button key={m} onClick={() => onUpdate('neural.openaiModel', m)}
                       className={`px-4 py-2 border font-mono text-[10px] transition-all ${state.openaiModel === m ? 'bg-secondary border-secondary text-background font-bold shadow-lg shadow-secondary/20' : 'border-outline-variant/20 text-on-surface-variant hover:border-secondary/50'}`}>
                       {m.toUpperCase()}
@@ -150,7 +151,7 @@ export const IntelligencePanel = memo(({ state, secrets, onUpdate }: Intelligenc
              <div className="space-y-2">
                <label className="font-label text-[9px] uppercase text-on-surface-variant">Recommended Models</label>
                <div className="flex flex-wrap gap-2">
-                 {['phi4', 'gemma3:4b', 'mistral', 'llama3.2'].map(m => (
+                 {['mistral', 'llama3.2'].map(m => (
                    <button key={m} onClick={() => onUpdate('neural.ollamaModel', m)}
                      className={`px-3 py-1.5 border font-mono text-[9px] transition-all ${state.ollamaModel === m ? 'bg-tertiary border-tertiary text-background font-bold' : 'border-outline-variant/10 text-on-surface-variant hover:border-tertiary/50'}`}>
                      {m.toUpperCase()}
