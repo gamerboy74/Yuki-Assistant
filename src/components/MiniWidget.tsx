@@ -14,7 +14,6 @@
 import { useEffect } from 'react';
 import { useSettingsStore } from '../store/settingsStore';
 import type { OrbState } from '../App';
-import { EnergyOrb } from './common/EnergyOrb';
 
 interface MiniWidgetProps {
   onTrigger: () => void;
@@ -113,33 +112,39 @@ export default function MiniWidget({ onTrigger, onExpand, onClose, orbState }: M
           }}
         />
 
-        {/* ── Energy Orb (scaled) ──────────────────────────────────────── */}
-        <div
-          className="relative flex-shrink-0 no-drag-region"
-          style={{
-            width: 56,
-            height: 56,
-            /* Clip the oversized scaled orb to its container */
-            overflow: 'hidden',
-            borderRadius: '50%',
-          }}
+        {/* ── Lightweight CSS Orb (GPU-efficient, replaces scaled EnergyOrb) ── */}
+        <button
+          onClick={onTrigger}
+          className="relative flex-shrink-0 no-drag-region rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[#06050f] focus-visible:ring-primary/80 transition-transform active:scale-95"
+          aria-label={`Yuki — ${orbState}`}
+          style={{ width: 52, height: 52 }}
         >
-          {/* Scale the 180px ambient orb down to 56px */}
-          <div style={{
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%) scale(0.31)',
-            transformOrigin: 'center',
-            pointerEvents: 'auto',
-          }}>
-            <EnergyOrb
-              orbState={orbState}
-              onTrigger={onTrigger}
-              variant="ambient"
-            />
-          </div>
-        </div>
+          {/* Glow layer */}
+          <span
+            className="absolute inset-0 rounded-full"
+            style={{
+              background: `radial-gradient(circle at 38% 35%, ${s.color}33 0%, ${s.color}08 60%, transparent 80%)`,
+              boxShadow: `0 0 18px ${s.color}55, inset 0 1px 0 rgba(255,255,255,0.15)`,
+              animation: s.pulse ? 'orbBreath 1.8s ease-in-out infinite' : 'orbBreath 3s ease-in-out infinite',
+            }}
+          />
+          {/* Border ring */}
+          <span
+            className="absolute inset-0 rounded-full"
+            style={{ border: `1px solid ${s.color}30` }}
+          />
+          {/* Icon */}
+          <span
+            className="absolute inset-0 flex items-center justify-center material-symbols-outlined text-[20px]"
+            style={{
+              color: s.color,
+              filter: `drop-shadow(0 0 6px ${s.color})`,
+              fontVariationSettings: "'FILL' 1",
+            }}
+          >
+            {orbState === 'idle' ? 'graphic_eq' : orbState === 'listening' ? 'mic' : orbState === 'processing' ? 'cognition' : 'volume_up'}
+          </span>
+        </button>
 
         {/* ── Name + State label ───────────────────────────────────────── */}
         <div className="flex flex-col min-w-0 flex-1 z-10">
@@ -174,10 +179,7 @@ export default function MiniWidget({ onTrigger, onExpand, onClose, orbState }: M
           {/* Expand → full window */}
           <button
             onClick={onExpand}
-            className="w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200"
-            style={{ color: 'rgba(255,255,255,0.55)' }}
-            onMouseEnter={e => (e.currentTarget.style.color = '#fff', e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-            onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.55)', e.currentTarget.style.background = 'transparent')}
+            className="w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200 text-white/55 hover:text-white hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/40"
             title="Expand to full window"
           >
             <span className="material-symbols-outlined" style={{ fontSize: 17 }}>open_in_full</span>
@@ -186,10 +188,7 @@ export default function MiniWidget({ onTrigger, onExpand, onClose, orbState }: M
           {/* Close widget */}
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200"
-            style={{ color: 'rgba(255,255,255,0.55)' }}
-            onMouseEnter={e => (e.currentTarget.style.color = '#f87171', e.currentTarget.style.background = 'rgba(239,68,68,0.10)')}
-            onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.55)', e.currentTarget.style.background = 'transparent')}
+            className="w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200 text-white/55 hover:text-red-400 hover:bg-red-500/[0.10] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-400/40"
             title="Hide widget"
           >
             <span className="material-symbols-outlined" style={{ fontSize: 17 }}>close</span>

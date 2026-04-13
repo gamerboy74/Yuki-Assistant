@@ -101,7 +101,7 @@ export default function History({ messages }: HistoryProps) {
                   </div>
                   <div className="flex-grow space-y-3">
                     <div className="flex justify-between items-start gap-4">
-                      <h3 className="font-headline text-xl text-on-surface tracking-tight">
+                      <h3 className="font-headline text-xl text-on-surface tracking-tight line-clamp-2">
                         "{ex.user?.text ?? ex.assistant?.text}"
                       </h3>
                       <span className="font-label text-xs text-on-surface-variant tracking-widest uppercase flex-shrink-0">

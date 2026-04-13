@@ -34,23 +34,43 @@ const ICON_MAP: Record<OrbState, string> = {
   speaking: 'volume_up',
 };
 
-/* ── Neural Link Selector Component ── */
-const ProviderSelector = memo(({ 
-  selectedProvider, 
-  onProviderChange 
-}: { 
-  selectedProvider: string, 
-  onProviderChange?: (p: string) => void 
+/* ── Neural Link Selector Component �const ProviderSelector = memo(({
+  selectedProvider,
+  onProviderChange
+}: {
+  selectedProvider: string,
+  onProviderChange?: (p: string) => void
 }) => {
   const [showMenu, setShowMenu] = useState(false);
   const activeProvider = PROVIDER_CONFIG[selectedProvider] || PROVIDER_CONFIG.gemini;
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Fix 1: Close dropdown when clicking anywhere outside
+  useEffect(() => {
+    if (!showMenu) return;
+    const handleOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setShowMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [showMenu]);
+
+  // Close on Escape
+  useEffect(() => {
+    if (!showMenu) return;
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowMenu(false); };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [showMenu]);
 
   return (
-    <div className="absolute top-10 right-10 z-[60]">
+    <div className="absolute top-10 right-10 z-[60]" ref={ref}>
       <div className="relative">
         <button
           onClick={() => setShowMenu(!showMenu)}
-          className="flex items-center gap-3 bg-black/40 border border-white/5 pr-5 pl-3 py-2 rounded-full backdrop-blur-xl hover:bg-white/5 hover:border-white/20 transition-all select-none group"
+          className="flex items-center gap-3 bg-black/40 border border-white/5 pr-5 pl-3 py-2 rounded-full backdrop-blur-xl hover:bg-white/5 hover:border-white/20 transition-all select-none group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
         >
           <div className="w-8 h-8 rounded-full flex items-center justify-center transition-all duration-500"
             style={{ background: `${activeProvider.color}15`, border: `1px solid ${activeProvider.color}30`, boxShadow: `0 0 15px ${activeProvider.color}20` }}>
@@ -77,14 +97,11 @@ const ProviderSelector = memo(({
             {Object.entries(PROVIDER_CONFIG).map(([key, cfg]) => (
               <button
                 key={key}
-                onClick={() => {
-                  onProviderChange?.(key);
-                  setShowMenu(false);
-                }}
-                className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all group/item
+                onClick={() => { onProviderChange?.(key); setShowMenu(false); }}
+                className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all group/item focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/20
                   ${selectedProvider === key ? 'bg-white/5 border border-white/10' : 'hover:bg-white/[0.03] border border-transparent'}`}
               >
-                <div className="w-8 h-8 rounded-full flex items-center justify-center border border-white/5" 
+                <div className="w-8 h-8 rounded-full flex items-center justify-center border border-white/5"
                   style={{ background: selectedProvider === key ? `${cfg.color}15` : 'transparent' }}>
                   <span className="material-symbols-outlined text-[18px]" style={{ color: selectedProvider === key ? cfg.color : 'rgba(255,255,255,0.2)' }}>
                     {cfg.icon}
@@ -103,63 +120,70 @@ const ProviderSelector = memo(({
       </div>
     </div>
   );
+});  );
 });
 
 /* ── Message Thread ── */
-const MessageThread = memo(({
+const MessageThread = memo((
+{
   messages,
   orbState,
 }: {
   messages: ChatMessage[];
   orbState: OrbState;
-}) => (
-  <div className="max-w-3xl mx-auto space-y-8 pb-10">
-    {messages.map((msg, idx) => (
-      <div
-        key={msg.id}
-        className={`flex flex-col gap-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
-        style={{ animation: `msgIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) both ${idx * 0.05}s` }}
-      >
-        <div className={`flex items-center gap-3 px-1 opacity-40 font-mono text-[9px] tracking-widest uppercase
-          ${msg.role === 'user' ? 'flex-row-reverse text-right' : 'text-left'}`}>
-          <span className="font-bold">{msg.role === 'user' ? 'Local User' : 'Neural Core'}</span>
-          <span>//</span>
-          <span>{msg.role === 'user' ? 'Protocol: Manual' : 'Protocol: Synthetic'}</span>
-          <span>//</span>
-          <span>{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-        </div>
+}) => {
+  // Fix 6: Track mount-time count so only NEW messages get the slide-in animation
+  const mountCount = useRef(messages.length);
 
+  return (
+    <div className="max-w-3xl mx-auto space-y-8 pb-10">
+      {messages.map((msg, idx) => (
         <div
-          className={`relative max-w-[85%] px-5 py-4 rounded-sm transition-all duration-500
-            ${msg.role === 'user'
-              ? 'bg-white/[0.03] border-r-2 border-white/20 text-white/90 shadow-sm'
-              : 'bg-primary/5 border-l-2 border-primary/40 text-white shadow-[0_0_20px_rgba(143,245,255,0.03)]'
-            }`}
+          key={msg.id}
+          className={`flex flex-col gap-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+          style={idx >= mountCount.current ? { animation: `msgIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) both` } : undefined}
         >
-          <p className="leading-relaxed whitespace-pre-wrap text-sm font-light tracking-wide">{msg.text}</p>
-          {msg.role === 'assistant' && (
-            <div className="absolute top-0 right-0 w-2 h-2 border-t border-r border-primary/30" />
-          )}
-        </div>
-      </div>
-    ))}
+          <div className={`flex items-center gap-3 px-1 opacity-40 font-mono text-[9px] tracking-widest uppercase
+            ${msg.role === 'user' ? 'flex-row-reverse text-right' : 'text-left'}`}>
+            <span className="font-bold">{msg.role === 'user' ? 'Local User' : 'Neural Core'}</span>
+            <span>//</span>
+            <span>{msg.role === 'user' ? 'Protocol: Manual' : 'Protocol: Synthetic'}</span>
+            <span>//</span>
+            <span>{msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+          </div>
 
-    {orbState === 'processing' && (
-      <div className="flex flex-col gap-2 items-start" style={{ animation: 'msgIn 0.4s ease both' }}>
-        <div className="flex items-center gap-3 px-1 opacity-20 font-mono text-[9px] tracking-widest uppercase">
-          <span className="font-bold">Neural Core</span>
-          <span>//</span>
-          <span className="animate-pulse">Decoding Stream...</span>
+          <div
+            className={`relative max-w-[85%] px-5 py-4 rounded-sm transition-all duration-500
+              ${msg.role === 'user'
+                ? 'bg-white/[0.03] border-r-2 border-white/20 text-white/90 shadow-sm'
+                : 'bg-primary/5 border-l-2 border-primary/40 text-white shadow-[0_0_20px_rgba(143,245,255,0.03)]'
+              }`}
+          >
+            <p className="leading-relaxed whitespace-pre-wrap text-sm font-light tracking-wide">{msg.text}</p>
+            {msg.role === 'assistant' && (
+              <div className="absolute top-0 right-0 w-2 h-2 border-t border-r border-primary/30" />
+            )}
+          </div>
         </div>
-        <div className="flex gap-1.5 p-4 bg-primary/5 border-l-2 border-primary/10 rounded-sm">
-          <div className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-pulse" />
-          <div className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-pulse [animation-delay:0.2s]" />
-          <div className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-pulse [animation-delay:0.4s]" />
+      ))}
+
+      {orbState === 'processing' && (
+        <div className="flex flex-col gap-2 items-start" style={{ animation: 'msgIn 0.4s ease both' }}>
+          <div className="flex items-center gap-3 px-1 opacity-20 font-mono text-[9px] tracking-widest uppercase">
+            <span className="font-bold">Neural Core</span>
+            <span>//</span>
+            <span className="animate-pulse">Decoding Stream...</span>
+          </div>
+          <div className="flex gap-1.5 p-4 bg-primary/5 border-l-2 border-primary/10 rounded-sm">
+            <div className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-pulse" />
+            <div className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-pulse [animation-delay:0.2s]" />
+            <div className="w-1.5 h-1.5 rounded-full bg-primary/40 animate-pulse [animation-delay:0.4s]" />
+          </div>
         </div>
-      </div>
-    )}
-  </div>
-));
+      )}
+    </div>
+  );
+});
 
 /* ── Neural Terminal Component ── */
 const NeuralTerminal = memo(({
@@ -211,7 +235,7 @@ const NeuralTerminal = memo(({
           </div>
           
           <input
-            className="flex-1 bg-transparent border-none outline-none text-sm font-mono placeholder:text-white/10 text-white selection:bg-primary/30"
+            className="flex-1 bg-transparent border-none outline-none text-sm font-mono placeholder:text-white/10 text-white selection:bg-primary/30 focus-visible:outline-none"
             placeholder="Awaiting command..."
             value={inputText}
             onChange={e => setInputText(e.target.value)}
@@ -219,10 +243,19 @@ const NeuralTerminal = memo(({
           />
 
           <div className="flex items-center gap-2">
-            <button onClick={onToggleChat} className="p-2 rounded-md text-white/20 hover:text-primary hover:bg-white/5 transition-all">
-              <span className="material-symbols-outlined text-[20px]">{showChat ? 'layers_clear' : 'terminal'}</span>
+            <button
+              onClick={onToggleChat}
+              className="p-2 rounded-md text-white/20 hover:text-primary hover:bg-white/5 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+              title={showChat ? 'Hide chat log' : 'Show chat log'}
+            >
+              <span className="material-symbols-outlined text-[20px]">{showChat ? 'chat_bubble' : 'chat_bubble_outline'}</span>
             </button>
-            <button onClick={handleSend} disabled={!inputText.trim()} className="w-10 h-10 rounded-md flex items-center justify-center transition-all bg-primary/10 border border-primary/20 text-primary hover:bg-primary hover:text-black active:scale-95 disabled:opacity-5 disabled:grayscale">
+            <button
+              onClick={handleSend}
+              disabled={!inputText.trim()}
+              className="w-10 h-10 rounded-md flex items-center justify-center transition-all bg-primary/10 border border-primary/20 text-primary hover:bg-primary hover:text-black active:scale-95 disabled:opacity-5 disabled:grayscale focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/80"
+              aria-label="Send message"
+            >
               <span className="material-symbols-outlined font-bold text-[20px]">play_arrow</span>
             </button>
           </div>
@@ -284,18 +317,42 @@ export default function AgentView({
             {isHotListening ? 'Ready for input…' : orbState === 'idle' ? `${greeting}, boss` : statusLabel}
           </h2>
           {transcription && (
-            <p className="mt-4 text-[11px] font-mono text-white/35 max-w-xs mx-auto animate-pulse">
+            <p className="mt-4 text-[11px] font-mono text-white/35 max-w-xs mx-auto">
               &gt; {transcription}
             </p>
           )}
         </div>
+
+        {/* Fix 13: Empty voice-mode hint — shown only when no messages yet and chat is hidden */}
+        {!showChat && messages.length <= 1 && orbState === 'idle' && (
+          <div
+            className="mt-8 flex flex-col items-center gap-3 px-6"
+            style={{ animation: 'fadeUp 0.8s ease both 0.3s' }}
+          >
+            <div className="flex items-center gap-3 px-6 py-3 rounded-full border border-white/[0.06] bg-white/[0.02] backdrop-blur-sm">
+              <span className="material-symbols-outlined text-[16px] opacity-30" style={{ fontVariationSettings: "'FILL' 1" }}>mic</span>
+              <span className="text-[10px] font-mono tracking-[0.15em] text-white/25 uppercase">Say &quot;Hey Yuki&quot; or click the orb</span>
+            </div>
+            <div className="flex gap-4 mt-1">
+              {['What can you do?', 'Check the weather', 'Open browser'].map((hint) => (
+                <span
+                  key={hint}
+                  className="text-[9px] text-white/20 border border-white/[0.05] px-3 py-1 rounded-full hover:text-white/40 hover:border-white/10 cursor-pointer transition-all"
+                  onClick={() => onSendMessage(hint)}
+                >
+                  {hint}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {clarifyQuestion && (
           <div className="mt-8 flex flex-col items-center gap-4 px-6 max-w-md" style={{ animation: 'fadeUp 0.4s ease both' }}>
             <p className="text-gray-400 text-xs text-center leading-relaxed italic">"{clarifyQuestion}"</p>
             <div className="flex flex-wrap justify-center gap-2">
               {clarifyOptions.map((opt, i) => (
-                <button key={i} onClick={() => onChoice(opt)} className="px-4 py-1.5 rounded-full text-[11px] font-medium border border-white/10 bg-white/5 hover:bg-white/10 transition-all active:scale-95" style={{ color: activeColor }}>
+                <button key={i} onClick={() => onChoice(opt)} className="px-4 py-1.5 rounded-full text-[11px] font-medium border border-white/10 bg-white/5 hover:bg-white/10 transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60" style={{ color: activeColor }}>
                   {opt}
                 </button>
               ))}

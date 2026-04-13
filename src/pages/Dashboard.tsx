@@ -183,10 +183,10 @@ export default function Dashboard({ stats, logs, usage }: DashboardProps) {
           </div>
 
           <div className="flex items-center justify-between py-2 border-b border-outline-variant/10">
-             <span className="text-xs text-on-surface-variant">Signal Traffic</span>
+             <span className="text-xs text-on-surface-variant">Session Data Transfer</span>
              <div className="flex gap-3 text-[10px] font-mono">
-                <span className="text-primary" title="Total Bytes Sent">↑ {(stats?.network?.sent / 1024 / 1024 || 0).toFixed(1)}MB</span>
-                <span className="text-secondary" title="Total Bytes Received">↓ {(stats?.network?.recv / 1024 / 1024 || 0).toFixed(1)}MB</span>
+                <span className="text-primary" title="Total data sent this session">↑ {(stats?.network?.sent / 1024 / 1024 || 0).toFixed(1)} MB</span>
+                <span className="text-secondary" title="Total data received this session">↓ {(stats?.network?.recv / 1024 / 1024 || 0).toFixed(1)} MB</span>
              </div>
           </div>
 
@@ -229,7 +229,7 @@ export default function Dashboard({ stats, logs, usage }: DashboardProps) {
           <div className="flex flex-col items-center justify-center py-4 bg-white/[0.02] border border-white/5 rounded-xl mb-2">
              <div className="text-[10px] text-on-surface-variant/40 uppercase tracking-[0.2em] mb-1 font-bold">Session Consumption</div>
              <div className="text-3xl font-mono text-on-surface tracking-tighter">
-                ${usage.cost.toFixed(usage.cost < 0.01 ? 6 : 4)}
+                {usage.cost === 0 ? '$0.00' : `$${usage.cost.toFixed(usage.cost < 0.01 ? 6 : 4)}`}
              </div>
              <div className="text-[9px] text-secondary font-mono mt-1 opacity-60">
                 {usage.turns} BRAIN CYCLES

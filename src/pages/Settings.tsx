@@ -221,8 +221,8 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-12 relative hide-scrollbar">
-        <div className="max-w-6xl mx-auto pb-32">
+      <div className="flex-1 overflow-y-auto p-8 relative hide-scrollbar">
+        <div className="max-w-4xl mx-auto pb-32">
           {s.activeTab === 'identity' && (
             <ErrorBoundary fallback={<div className="p-4 text-error font-mono text-[10px]">IDENTITY_PANEL_FAILURE</div>}>
              <IdentityPanel 
