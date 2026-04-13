@@ -51,56 +51,6 @@ WHISPER_INITIAL_PROMPT = (
     "screenshot, volume, battery, time, WhatsApp, YouTube chalao."
 )
 
-_whisper_model = None
-_loaded_model_size = None
-
-
-def _get_whisper():
-    """Lazy load Whisper model on first use or if model size changed."""
-    global _whisper_model, _loaded_model_size
-    
-    current_size = get_model_size()
-
-    if _whisper_model is None or _loaded_model_size != current_size:
-        if _whisper_model is not None:
-             logger.info(f"Model size changed from {_loaded_model_size} to {current_size}. Reloading...")
-             # Clear reference to help GC
-             _whisper_model = None 
-             import gc
-             gc.collect()
-
-        try:
-            from faster_whisper import WhisperModel
-
-            # Auto-detect CUDA GPU — 10x faster than CPU
-            try:
-                import torch
-                device      = "cuda"  if torch.cuda.is_available() else "cpu"
-                compute     = "float16" if device == "cuda" else "int8"
-            except ImportError:
-                device, compute = "cpu", "int8"
-
-            logger.info(
-                f"Loading Whisper '{current_size}' on {device.upper()} "
-                f"({compute}) — first run may download model..."
-            )
-            import faster_whisper
-            model_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "whisper")
-            os.makedirs(model_path, exist_ok=True)
-            
-            _whisper_model = faster_whisper.WhisperModel(
-                current_size, device=device, compute_type=compute,
-                download_root=model_path
-            )
-            _loaded_model_size = current_size
-            logger.info(f"Whisper model loaded successfully on {device.upper()} at {model_path}.")
-        except ImportError:
-            logger.error("faster-whisper not installed. Run: pip install faster-whisper")
-            raise
-        except Exception as e:
-            logger.error(f"Failed to load Whisper model: {e}")
-            raise
-    return _whisper_model
 
 class AsyncWhisperStreamer:
     """
@@ -145,6 +95,21 @@ class AsyncWhisperStreamer:
             logger.error(f"Whisper initialization failed: {e}")
             raise
 
+    def unload(self):
+        """Release model from VRAM. Next transcribe_bytes call will reload."""
+        if self.model is not None:
+            del self.model
+            self.model = None
+            import gc
+            import torch
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            logger.info("Whisper model unloaded from VRAM.")
+
+    def is_loaded(self) -> bool:
+        return self.model is not None
+
     async def load(self):
         """Async-friendly model loader."""
         import asyncio
@@ -187,7 +152,6 @@ class AsyncWhisperStreamer:
                     audio_float32,
                     language=whisper_lang,  # Locked if configured
                     task="transcribe",
-                    bridge=True,            # Ensures punctuation/casing for better neural parsing
                     beam_size=1,            # Neural Economy: 1 is much faster for real-time interaction
                     vad_filter=True,
                     initial_prompt=WHISPER_INITIAL_PROMPT
@@ -221,9 +185,4 @@ def get_streamer():
         _shared_streamer = AsyncWhisperStreamer()
     return _shared_streamer
 
-def recognize_speech_sync(audio_bytes: bytes) -> str:
-    """Synchronous wrapper for legacy code usage."""
-    import asyncio
-    streamer = get_streamer()
-    return asyncio.run(streamer.transcribe_bytes(audio_bytes))
 

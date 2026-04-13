@@ -32,6 +32,9 @@ from backend.utils.monitoring import PSUTIL_AVAILABLE, psutil
 
 class ProactiveAgent:
     """Background thread that monitors system health and fires Yuki alerts."""
+    
+    # 2 × 30s = 60s sustained before alerting
+    CPU_SUSTAINED_POLLS = 2
 
     def __init__(self, fire_alert_fn):
         """
@@ -40,17 +43,22 @@ class ProactiveAgent:
         """
         self._fire_alert_callback = fire_alert_fn
         self._stop  = threading.Event()
+        self._boot_complete = threading.Event()
         self._last_alert: dict[str, float] = {}   # alert_type → last_fired_timestamp
         self._thread: threading.Thread | None = None
 
         # Track CPU high samples (need sustained high load, not a spike)
         self._cpu_high_count = 0
-        CPU_SUSTAINED_POLLS = 2  # 2 × 30s = 60s sustained before alerting
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
-        logger.info("[PROACTIVE] Background agent started.")
+        logger.info("[PROACTIVE] Background agent started (Waiting for BOOT).")
+
+    def signal_boot_complete(self) -> None:
+        """Called by orchestrator once all neural pipelines are ready."""
+        self._boot_complete.set()
+        logger.info("[PROACTIVE] System boot complete. Monitoring active.")
 
     async def start_async(self) -> None:
         """Async-friendly wrapper for modern orchestrators."""
@@ -66,6 +74,10 @@ class ProactiveAgent:
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _run(self) -> None:
+        # ── BOOT GATE ──
+        # Block until the full system (Whisper, Kokoro, etc.) is ready
+        self._boot_complete.wait()
+
         while not self._stop.is_set():
             try:
                 self._check_all()
@@ -86,7 +98,7 @@ class ProactiveAgent:
         else:
             self._cpu_high_count = 0
 
-        if self._cpu_high_count >= 2:  # Sustained for 2 polls (~60s)
+        if self._cpu_high_count >= self.CPU_SUSTAINED_POLLS:
             self._fire_alert(
                 "cpu",
                 f"Sir, I'm noticing sustained high load. Your CPU is at {cpu:.0f}%. "

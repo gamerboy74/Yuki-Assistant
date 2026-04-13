@@ -11,21 +11,27 @@ _weather_cache = {
     "last_fetched": 0
 }
 
+# Global location cache to prevent ipapi.co 429 (Rate Limit) errors
+_cached_location = None
+
 async def get_weather_data():
     """Fetches weather data based on IP location if cache is expired."""
+    global _cached_location
     now = time.time()
     if _weather_cache["data"] and (now - _weather_cache["last_fetched"]) < WEATHER_CACHE_DURATION:
         return _weather_cache["data"]
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # 1. Get Location via IP
-            logger.info("[WEATHER] Fetching location from IP...")
-            loc_res = await client.get("https://ipapi.co/json/", follow_redirects=True)
-            if loc_res.status_code != 200:
-                raise Exception(f"Location API failed with status {loc_res.status_code}")
+            # 1. Get Location (Cached)
+            if _cached_location is None:
+                logger.info("[WEATHER] Fetching location from IP (First Run)...")
+                loc_res = await client.get("https://ipapi.co/json/", follow_redirects=True)
+                if loc_res.status_code != 200:
+                    raise Exception(f"Location API failed with status {loc_res.status_code}")
+                _cached_location = loc_res.json()
             
-            loc_data = loc_res.json()
+            loc_data = _cached_location
             lat = loc_data.get("latitude")
             lon = loc_data.get("longitude")
             city = loc_data.get("city", "Unknown")

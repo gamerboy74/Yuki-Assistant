@@ -12,6 +12,7 @@ from backend.speech.sentinel import VoiceSentinel, VADStreamProcessor
 from backend.speech.recognition import AsyncWhisperStreamer
 from backend.speech.wake_word import WakeWordDetector
 from backend.brain import process_stream
+from backend.utils.audio_duck import duck, unduck
 from backend.speech.synthesis_kokoro import HPVoiceSwitcher
 from backend.proactive_agent import ProactiveAgent
 from backend import executor
@@ -42,6 +43,7 @@ class YukiOrchestrator:
         self.running = False
         self.mode = "idle" # "idle" (wake word) or "active" (VAD)
         self.is_speaking = False
+        self._speaking_count = 0
         self.stop_playback_event = asyncio.Event()
         self._current_brain_task = None
         self._speech_streak = 0
@@ -49,6 +51,7 @@ class YukiOrchestrator:
         self._pause_gate.set() # Open by default
         self.is_verifying_interruption = False
         self._last_was_question = False
+        self._is_text_turn = False  # True when turn originated from keyboard (not microphone)
 
         # Wire the orchestrator's stop event to synthesis.py's global stop mechanism
         import backend.speech.synthesis as _synth_module
@@ -95,6 +98,11 @@ class YukiOrchestrator:
         self.audio_buffer = bytearray()
         self.recording = False
         self._proactive_lock = asyncio.Lock()
+        self._confirmation_event = asyncio.Event()
+
+    def signal_confirmation(self):
+        """Called by IPC bridge when user clicks 'confirm' or verbally confirms."""
+        self._confirmation_event.set()
 
     def _check_elevenlabs_ready(self) -> bool:
         """Check if ElevenLabs TTS is configured — checks config file AND env vars."""
@@ -156,17 +164,29 @@ class YukiOrchestrator:
         start_time = time.perf_counter()
         self._log("Priming neural pipelines...")
         
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(self.sentinel.load())
-            tg.create_task(self.stt.load())
-            tg.create_task(self.voice_switcher.load())
-            tg.create_task(self.proactive.start_async())
+        async def _safe_load(name: str, coro):
+            try:
+                await coro
+                logger.info(f"[BOOT] {name} loaded successfully.")
+            except Exception as e:
+                logger.error(f"[BOOT] {name} failed to load: {e}. Continuing in degraded mode.")
+
+        await asyncio.gather(
+            _safe_load("Silero VAD", self.sentinel.load()),
+            _safe_load("Whisper STT", self.stt.load()),
+            _safe_load("Kokoro TTS", self.voice_switcher.load()),
+            _safe_load("Proactive Agent", self.proactive.start_async()),
+        )
             
         elapsed = time.perf_counter() - start_time
         logger.info(f"Neural pipelines online in {elapsed:.2f}s.")
-        self._log("All neural links established.")
+        self._log("Neural links established (check logs for any degraded components).")
+
+        # ── Step 2: Signal Proactive Agent to start monitoring ──
+        # Now that synthesis engine is warmed up, it's safe to fire alerts.
+        self.proactive.signal_boot_complete()
             
-        # ── Step 2: Launch background capture and logic loops ──
+        # ── Step 3: Launch background capture and logic loops ──
         # We start these as background tasks and return. This allows the 
         # Assistant to proceed to the greeting as soon as initialization is done.
         input_queue = asyncio.Queue()
@@ -191,6 +211,12 @@ class YukiOrchestrator:
             while self.running:
                 # Use run_in_executor to not block the event loop with blocking read
                 data = await asyncio.to_thread(stream.read, 512, exception_on_overflow=False)
+                
+                # --- ECHO GATE ---
+                # Discard audio chunks if Yuki is currently speaking to prevent self-transcription
+                if getattr(self, "is_speaking", False):
+                    continue
+
                 await queue.put(data)
         except Exception as e:
             logger.error(f"Input stream error: {e}")
@@ -279,12 +305,14 @@ class YukiOrchestrator:
                 self.audio_buffer = bytearray()
                 self._active_since = time.time()
                 self._emit("listening")
+                duck() # Dim music while listening to user
                 
             if self.recording:
                 self.audio_buffer.extend(chunk)
             
             if event == "speech_end":
                 self.recording = False
+                unduck() # Restore volume after user finished speaking
                 turn_id = self._new_turn_id()
                 self._emit("processing", turn_id=turn_id)
                 
@@ -377,6 +405,7 @@ class YukiOrchestrator:
 
         turn_id = self._new_turn_id()
         self.mode = "active"
+        self._is_text_turn = True  # Smart isolation: flag as text turn → go idle after cleanup
         self._emit("processing", turn_id=turn_id)
 
         async with self.turn_lock:
@@ -435,7 +464,10 @@ class YukiOrchestrator:
         # Stop any ongoing speech/playback
         self.stop_playback_event.set()
         
-        self.recording = False
+        if self.recording:
+            self.recording = False
+            unduck()
+            
         self.audio_buffer = bytearray()
         self._active_since = 0.0
         self.mode = "idle"
@@ -503,9 +535,8 @@ class YukiOrchestrator:
                 action = event.get("action")
                 
                 if action and action.get("type") != "none":
-                    # Run actual OS command
-                    logger.info(f"Neural Trigger: {action['type']} | params: {action.get('params')}")
-                    exec_result = await asyncio.to_thread(executor.execute, action, self.send)
+                    # Hardened Confirmation Layer for destructive plugins
+                    exec_result = await self._execute_with_confirmation(action, turn_id)
                     
                     # Behavioral Learning: Track successful execution to learn user patterns
                     from backend.brain import reasoning
@@ -539,11 +570,26 @@ class YukiOrchestrator:
         except Exception as e:
             logger.error(f"[ORCHESTRATOR] Cleanup failure for {turn_id}: {e}")
         finally:
-            # Emitting these here ensures visually that Yuki stays 'speaking' 
-            # until the audio ends, even though the Thinking Lock was released early.
-            self._active_since = time.time()
             self._emit("turn_completed", turn_id=turn_id)
-            self._emit("listening") 
+
+            # ── Smart Isolation: Listening vs Idle post-turn ──────────────────────
+            # For text input turns: go straight to idle (user is at keyboard, not mic).
+            # For voice turns where Yuki asked a question: stay in active listening.
+            # For all other voice turns: go to idle (wake-word mode).
+            is_text_turn = getattr(self, "_is_text_turn", False)
+            self._is_text_turn = False  # Always reset flag
+
+            if is_text_turn or not self._last_was_question:
+                # Return to idle — either text turn or Yuki didn't ask a question
+                self.mode = "idle"
+                self._active_since = 0.0
+                self._emit("idle", turn_id=turn_id)
+                logger.debug(f"[ORCHESTRATOR] Turn {turn_id} complete → IDLE")
+            else:
+                # Yuki asked a question in voice mode — stay active for the follow-up
+                self._active_since = time.time()
+                self._emit("listening")
+                logger.debug(f"[ORCHESTRATOR] Turn {turn_id} complete → LISTENING (question pending)")
 
             # Clear global references if THEY are the tasks that just finished
             if self._synth_task == synth_task: self._synth_task = None
@@ -551,7 +597,7 @@ class YukiOrchestrator:
 
             if not self.is_verifying_interruption and not self.is_speaking:
                 self.stop_playback_event.clear()
-            
+
             logger.debug(f"Turn {turn_id} cleanup complete.")
 
     def _get_acknowledgment(self) -> str:
@@ -590,6 +636,69 @@ class YukiOrchestrator:
             # Give significantly more time for answering a question (e.g. 20s)
             return base * 2.5 
         return base
+
+    def _begin_speaking(self):
+        """Reference-counted speaker gate opening."""
+        self._speaking_count += 1
+        self.is_speaking = True
+        logger.debug(f"[GATE] Speaking count: {self._speaking_count} (Muted)")
+
+    def _end_speaking(self):
+        """Reference-counted speaker gate closing."""
+        self._speaking_count = max(0, self._speaking_count - 1)
+        if self._speaking_count == 0:
+            self.is_speaking = False
+            logger.debug("[GATE] Speaking count: 0 (Unmuted)")
+        else:
+            logger.debug(f"[GATE] Speaking count: {self._speaking_count} (Still Muted)")
+
+    async def speak(self, text: str):
+        """Public alias for internal speech alerts."""
+        self._begin_speaking()
+        duck()
+        try:
+            await self._speak_alert(text)
+        finally:
+            unduck()
+            self._end_speaking()
+
+    async def _execute_with_confirmation(self, action: dict, turn_id: str) -> str | None:
+        """Determines if an action needs user approval and manages the timeout/UI interaction."""
+        CONFIRM_REQUIRED_PLUGINS = {"file_ops", "email", "computer_hands", "system_control"}
+        plugin_name = action.get("type")
+
+        if plugin_name not in CONFIRM_REQUIRED_PLUGINS:
+            # Low-risk action, execute immediately
+            logger.info(f"Neural Trigger (Immediate): {plugin_name}")
+            return await asyncio.to_thread(executor.execute, action, self.send)
+
+        # High-risk action: Start the confirmation contract
+        logger.warning(f"[SECURITY] Awaiting confirmation for: {plugin_name}")
+        self._confirmation_event.clear()
+        
+        # 1. Prompt UI
+        self._emit("awaiting_confirmation", turn_id=turn_id, action=action)
+        
+        # 2. Speak the prompt (Brain usually does this, but we ensure it's logged)
+        self._log(f"Sir, I require your confirmation to execute: {plugin_name}.")
+        
+        try:
+            # 3. Wait for UI signal with strict 10s timeout
+            await asyncio.wait_for(self._confirmation_event.wait(), timeout=10.0)
+            
+            # 4. User confirmed
+            logger.info(f"[SECURITY] User confirmed {plugin_name}. Executing...")
+            return await asyncio.to_thread(executor.execute, action, self.send)
+            
+        except asyncio.TimeoutError:
+            # 5. Safety Default: Auto-cancel on timeout
+            logger.info(f"[SECURITY] Confirmation timeout for {plugin_name}. Action cancelled.")
+            self._emit("response", turn_id=turn_id, text="Action cancelled due to timeout.")
+            await self._speak_alert("Action cancelled.")
+            return "Sir, I cancelled the action as you didn't confirm in time."
+        except Exception as e:
+            logger.error(f"Confirmation layer failure: {e}")
+            return "Sir, something went wrong during the confirmation check."
 
 
     def _extract_inline_command(self, transcript: str) -> str:
@@ -689,10 +798,13 @@ class YukiOrchestrator:
                     if item["type"] == "file":
                         try: os.unlink(item["data"])
                         except: pass
-                    continue
+                    # CRITICAL: If interrupted, we must exit the loop immediately to trigger 
+                    # the finally block and restore system volume/microphone gate.
+                    break
                 
                 if not self.is_speaking:
-                    self.is_speaking = True
+                    self._begin_speaking()
+                    duck()
                     self._emit("speaking", turn_id=turn_id)
                 
                 if item["type"] == "native":
@@ -708,10 +820,10 @@ class YukiOrchestrator:
         except Exception as e:
             logger.error(f"Audio playback worker failed: {e}")
         finally:
-            if self.is_speaking:
-                self.is_speaking = False
-                # We don't necessarily go to 'idle' here, the turn manager handles that
-                # but we can send a hint or just let the finally block in _process_turn do it.
+            if getattr(self, "is_speaking", False):
+                unduck()
+            self._end_speaking()
+            # Turn manager (_await_turn_cleanup) handles idle/listening state transitions.
 
     async def _play_file_with_interrupt(self, path: str):
         """Play an mp3/wav file via unified synthesis playback."""
@@ -764,6 +876,9 @@ class YukiOrchestrator:
         """
         async with self._proactive_lock:
             turn_id = "proactive-alert"
+            mode_before = self.mode
+            self._begin_speaking()
+            duck() # System dimming for proactive alerts
             try:
                 # 1. Start Alert (UI)
                 self._emit("speaking", turn_id=turn_id)
@@ -781,11 +896,45 @@ class YukiOrchestrator:
                         await self._speak_local_with_interrupt(message, turn_id=turn_id)
                 else:
                     await self._speak_local_with_interrupt(message, turn_id=turn_id)
+
+                # 3. Context Injection
+                from backend.brain import shared
+                shared.add_assistant_message(f"[Proactive] {message}")
+
+                # 4. Mode Persistence/Switching
+                is_question = message.strip().endswith("?")
+                if is_question:
+                    self.mode = "active"
+                    self._active_since = time.monotonic()
+                    logger.info("[PROACTIVE] Question detected. Entering active listener window.")
+                elif mode_before == "idle":
+                    # Transition back to idle (wake word) state
+                    self.mode = "idle"
+                    self._emit("idle")
+                    self._active_since = 0.0
+
+                # 5. Autonomous Recovery Logic
+                if "ram" in message.lower():
+                    logger.info("[ORCHESTRATOR] Autonomous RAM recovery triggered.")
+                    try:
+                        from backend.plugins.browser import BrowserHygienePlugin
+                        hygiene = BrowserHygienePlugin()
+                        # Use to_thread since browser operations are sync but use playwright under the hood
+                        # though BrowserPlugin uses sync_playwright, so we should be careful.
+                        res = await asyncio.to_thread(hygiene.execute)
+                        logger.info(f"[ORCHESTRATOR] RAM Recovery Result: {res}")
+                        self._log(f"Autonomous memory cleanup complete: {res}")
+                    except Exception as he:
+                        logger.error(f"Autonomous RAM recovery failed: {he}")
+
             except Exception as e:
                 logger.error(f"[ORCHESTRATOR] Proactive alert failed: {e}")
             finally:
-                # 3. Cleanup Alert (UI)
+                # 5. Cleanup Alert (UI)
                 self._emit("idle", turn_id=turn_id)
+                if getattr(self, "is_speaking", False):
+                    unduck()
+                self._end_speaking()
                 logger.info(f"[PROACTIVE] Alert finished: {message[:30]}...")
 
     async def _speak_alert(self, text: str, turn_id: str = "system-alert"):
@@ -863,10 +1012,6 @@ class YukiOrchestrator:
                 self.stt.reload_model()
             except Exception as e:
                 logger.error(f"Whisper reload failed: {e}")
-
-    async def speak(self, text: str):
-        """Public entry point for triggering speech from external drivers (Assistant, triggers)."""
-        await self._speak_alert(text)
 
     def stop(self):
         """Standard shutdown procedure."""

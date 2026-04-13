@@ -4,21 +4,21 @@ const { contextBridge, ipcRenderer } = require('electron');
 const stateListeners = new Set();
 ipcRenderer.on('yuki:state', (_event, msg) => {
   stateListeners.forEach(callback => {
-    try { 
-      if (typeof callback === 'function') callback(msg); 
-    } catch (e) { 
-      console.error('IPC Callback Error:', e); 
+    try {
+      if (typeof callback === 'function') callback(msg);
+    } catch (e) {
+      console.error('IPC Callback Error:', e);
     }
   });
 });
 
 contextBridge.exposeInMainWorld('yukiAPI', {
   // Window controls
-  minimize: ()         => ipcRenderer.send('window:minimize'),
-  maximize: ()         => ipcRenderer.send('window:maximize'),
-  close:    ()         => ipcRenderer.send('window:close'),
-  hide:     ()         => ipcRenderer.send('window:hide'),
-  setMode:  (mode)     => ipcRenderer.send('window:set-mode', mode),
+  minimize: () => ipcRenderer.send('window:minimize'),
+  maximize: () => ipcRenderer.send('window:maximize'),
+  close: () => ipcRenderer.send('window:close'),
+  hide: () => ipcRenderer.send('window:hide'),
+  setMode: (mode) => ipcRenderer.send('window:set-mode', mode),
 
   // Receive state events from Python backend.
   onState: (callback) => {
@@ -55,7 +55,7 @@ contextBridge.exposeInMainWorld('yukiAPI', {
 
   // Settings & Memory
   saveSettings: (payload) => ipcRenderer.send('yuki:save-settings', payload),
-  getSettings:  () => ipcRenderer.invoke('yuki:get-settings'),
-  purgeMemory:  () => ipcRenderer.send('yuki:purge-memory'),
-  sendCommand:  (cmd)     => ipcRenderer.send('yuki:command', cmd),
+  getSettings: () => ipcRenderer.invoke('yuki:get-settings'),
+  purgeMemory: () => ipcRenderer.send('yuki:purge-memory'),
+  sendCommand: (cmd) => ipcRenderer.send('yuki:command', cmd),
 });

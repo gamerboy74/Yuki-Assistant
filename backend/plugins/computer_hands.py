@@ -35,7 +35,7 @@ class ComputerHandsPlugin(Plugin):
             if operation == "type_text":
                 import pyperclip
                 text = params.get("text", "")
-                time.sleep(0.5)
+                time.sleep(1.0)  # Give the active window time to be ready for input
                 
                 # Unicode-safe: paste via clipboard if non-ASCII detected
                 if any(ord(c) >= 128 for c in text):
@@ -45,6 +45,7 @@ class ComputerHandsPlugin(Plugin):
                     pyautogui.typewrite(text, interval=0.02)
 
                 return f"Typed: '{text[:40]}...'" if len(text) > 40 else f"Typed: '{text}'"
+
 
             elif operation == "key_shortcut":
                 keys = params.get("keys", [])

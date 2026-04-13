@@ -8,6 +8,7 @@ let tray;
 let pythonProcess = null;
 let uiReady = false;
 let pendingStateMessages = [];
+let isWindowMaximized = false;  // Own flag — isMaximized() unreliable on transparent frameless windows
 // Set YUKI_DEV=1 environment variable to use Vite dev server (localhost:5173)
 // Without it, always loads from dist/renderer (production build)
 const isDev = process.env.YUKI_DEV === '1';
@@ -22,7 +23,7 @@ function startPython() {
   // Try .venv first (project venv), then system python
   const venvPython = path.join(projectRoot, '.venv', 'Scripts', 'python.exe');
   const systemPython = 'python';
-  
+
   // Script: backend/assistant.py is the real entry point
   const scriptPath = path.join(projectRoot, 'backend', 'assistant.py');
 
@@ -112,7 +113,7 @@ function createWindow() {
     if (!process.argv.includes('--hidden')) {
       mainWindow.show();
     }
-    
+
     // Load history
     try {
       const fs = require('fs');
@@ -126,6 +127,29 @@ function createWindow() {
     }
   });
 
+  // ── Window State → Renderer Sync ─────────────────────────────────────────────
+  // Fires whenever the window is maximized/restored by ANY means:
+  // button click, double-click titlebar, Win+Up/Down, snap layouts, etc.
+  mainWindow.on('maximize', () => {
+    isWindowMaximized = true;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('yuki:state', { type: 'window:maximized' });
+    }
+  });
+  mainWindow.on('unmaximize', () => {
+    isWindowMaximized = false;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('yuki:state', { type: 'window:unmaximized' });
+    }
+  });
+
+  // Minimize to tray on close
+  mainWindow.on('close', (e) => {
+    if (!app.isQuitting) {
+      e.preventDefault();
+      mainWindow.hide();
+    }
+  });
 
   if (isDev) {
     // Wait for Vite dev server to be ready before loading
@@ -151,14 +175,8 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/renderer/index.html'));
   }
 
-  // Minimize to tray on close
-  mainWindow.on('close', (e) => {
-    if (!app.isQuitting) {
-      e.preventDefault();
-      mainWindow.hide();
-    }
-  });
 }
+
 
 // ── Tray ───────────────────────────────────────────────────────────────────────
 function createTray() {
@@ -190,9 +208,9 @@ function createTray() {
     {
       label: 'Quick Actions',
       submenu: [
-        { label: '🎵 Play Music',   click: () => sendToPython({ type: 'manual_trigger' }) },
-        { label: '📸 Screenshot',   click: () => sendToPython({ type: 'manual_trigger' }) },
-        { label: '🔄 Wake Yuki',    click: () => sendToPython({ type: 'manual_trigger' }) },
+        { label: '🎵 Play Music', click: () => sendToPython({ type: 'manual_trigger' }) },
+        { label: '📸 Screenshot', click: () => sendToPython({ type: 'manual_trigger' }) },
+        { label: '🔄 Wake Yuki', click: () => sendToPython({ type: 'manual_trigger' }) },
       ],
     },
     { type: 'separator' },
@@ -222,7 +240,14 @@ function createTray() {
 // ── IPC Handlers from Renderer ────────────────────────────────────────────────
 ipcMain.on('window:minimize', () => mainWindow?.minimize());
 ipcMain.on('window:maximize', () => {
-  mainWindow?.isMaximized() ? mainWindow.unmaximize() : mainWindow?.maximize();
+  if (!mainWindow) return;
+  // Use our own flag instead of mainWindow.isMaximized() which is
+  // unreliable with frame:false + transparent:true on Windows.
+  if (isWindowMaximized) {
+    mainWindow.unmaximize();
+  } else {
+    mainWindow.maximize();
+  }
 });
 ipcMain.on('window:close', () => mainWindow?.close());
 ipcMain.on('window:hide', () => mainWindow?.hide());
@@ -231,8 +256,13 @@ ipcMain.on('window:set-mode', (event, mode) => {
   if (!mainWindow) return;
   if (mode === 'mini') {
     mainWindow.unmaximize();
-    mainWindow.setSize(400, 150);
-    mainWindow.setAlwaysOnTop(true);
+    // Use a compact pill bar: 480px wide, 80px tall
+    mainWindow.setSize(480, 80);
+    mainWindow.setAlwaysOnTop(true, 'floating');
+    // Position bottom-right of the primary display
+    const { screen } = require('electron');
+    const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+    mainWindow.setPosition(width - 500, height - 100);
   } else {
     mainWindow.setSize(1280, 800);
     mainWindow.setAlwaysOnTop(false);
@@ -288,15 +318,9 @@ ipcMain.on('yuki:save-history', (event, messages) => {
 
 ipcMain.on('yuki:save-settings', (event, payload) => {
   try {
-    const fs = require('fs');
-    const configPath = path.join(__dirname, '..', 'yuki.config.json');
-    
-    // 1. Persist to disk
-    fs.writeFileSync(configPath, JSON.stringify(payload, null, 2), 'utf-8');
-    console.log('[Yuki] Settings persisted to disk.');
-    
-    // 2. Notify Python backend to reload config in memory
+    // 1. Notify Python backend to merge into memory and persist to disk
     sendToPython({ type: 'save_settings', value: payload });
+    console.log('[Yuki] Settings dispatched to backend for persistence.');
   } catch (e) {
     console.error('Failed to save settings:', e);
   }

@@ -153,15 +153,40 @@ class BrowserPlugin(Plugin):
         except Exception as e:
             return f"Hygiene failed: {e}"
 
+    def _get_fresh_page(self):
+        """Get or create a live page. If the current page is closed, opens a new one."""
+        global _browser
+        context = _browser.contexts[0] if _browser.contexts else _browser.new_context()
+        # Try existing page first; if it's closed/dead, open a new one
+        for page in context.pages:
+            try:
+                _ = page.url  # Will raise if page is closed
+                return page
+            except Exception:
+                continue
+        return context.new_page()
+
     def _navigate(self, url: str) -> str:
         if not url: return "No URL provided."
         if not url.startswith(("http", "www.")): url = "https://" + url
         
-        page = self._get_page()
-        # Increased timeout and smarter wait state for slow sites like anikai
-        page.goto(url, wait_until="load", timeout=25000)
-        title = page.title()
-        return f"Navigated to '{title}'."
+        try:
+            page = self._get_page()
+            page.goto(url, wait_until="load", timeout=25000)
+            title = page.title()
+            return f"Navigated to '{title}'."
+        except Exception as e:
+            err = str(e)
+            if "Target page, context or browser has been closed" in err or "Target closed" in err:
+                logger.warning("[BROWSER] Page was closed — opening fresh page and retrying.")
+                try:
+                    page = self._get_fresh_page()
+                    page.goto(url, wait_until="load", timeout=25000)
+                    title = page.title()
+                    return f"Navigated to '{title}'."
+                except Exception as e2:
+                    raise e2
+            raise e
 
     def _search(self, query: str) -> str:
         if not query: return "Search query is empty."
@@ -169,8 +194,13 @@ class BrowserPlugin(Plugin):
         return self._navigate(url)
 
     def _read(self) -> str:
-        page = self._get_page()
-        # Smarter extraction: prioritize main content containers to save tokens
+        try:
+            page = self._get_page()
+            _ = page.url  # Probe liveness
+        except Exception:
+            logger.warning("[BROWSER] Active page was closed — using fresh page.")
+            page = self._get_fresh_page()
+
         text = page.evaluate("""() => {
             const selectors = ['article', 'main', '[role=main]', '.content', '#content', '.post-content'];
             for (const sel of selectors) {
@@ -181,6 +211,7 @@ class BrowserPlugin(Plugin):
         }""").strip()
         
         return text[:3000] # Safe limit for high-quality content
+
 
     def _click(self, target: str) -> str:
         if not target: return "No target to click."

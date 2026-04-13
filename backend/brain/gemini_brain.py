@@ -322,37 +322,62 @@ async def _run_agent_loop(
     """
     from backend.plugins import execute_plugin
 
+    # session_text tracks ONLY the last (final) generation step output.
+    # We reset each step so we don't concatenate intermediate reasoning
+    # with the final user-facing response.
     session_text = ""
     assistant_tool_calls_log = []
     tool_result_msgs_log = []
+    # Dedup guard: track sentence fingerprints already yielded this turn
+    _emitted_sentences: set[str] = set()
 
     for step in range(MAX_AGENT_STEPS):
         logger.debug(f"[BRAIN] Agent step {step + 1}/{MAX_AGENT_STEPS}")
         turn_text = ""
         turn_tool_calls = []
         raw_parts = []
+        step_text = ""       # Accumulate text for this step only
+        step_sentences = []  # Buffer: hold text_sentence events until we know if tools are called
 
         async for event in _run_generation(client, contents, system_content, model_name, tools):
             if event["type"] == "turn_done":
                 turn_text = event["full_text"]
                 turn_tool_calls = event["tool_calls"]
                 raw_parts = event["raw_parts"]
+            elif event["type"] == "text_sentence":
+                # Buffer — don't emit yet. If this step uses tools, this is
+                # internal chain-of-thought and should never reach the UI.
+                step_text += event["value"] + " "
+                step_sentences.append(event)
             else:
-                if event["type"] == "text_sentence":
-                    session_text += event["value"] + " "
+                # tool_start, usage, etc. — always forward immediately
                 yield event
 
-        # No tool calls → model is done, exit loop
+        # No tool calls → final answer step. Release buffered sentences to UI.
         if not turn_tool_calls:
+            session_text = step_text.strip()
+            for sent_event in step_sentences:
+                sentence_key = sent_event["value"].lower().strip()
+                if sentence_key not in _emitted_sentences:
+                    _emitted_sentences.add(sentence_key)
+                    yield sent_event
+                else:
+                    logger.debug(f"[BRAIN] Dedup: skipping duplicate sentence: '{sent_event['value'][:40]}'")
             logger.debug(f"[BRAIN] No tool calls at step {step + 1}. Agent complete.")
             break
+
+        # Tool calls exist → this step's text was reasoning. Suppress it silently.
+        logger.debug(f"[BRAIN] Step {step + 1} had tool calls — suppressing {len(step_sentences)} reasoning sentence(s).")
+        session_text = step_text.strip()
 
         # ── Neural Alignment Fix: Replay exact parts for G3 thought-signature compliance ──
         if raw_parts:
             contents.append({"role": "model", "parts": raw_parts})
 
-        # Execute tools in parallel
-        tasks = [asyncio.to_thread(execute_plugin, fc.name, fc.args) for fc in turn_tool_calls]
+        from backend.plugins import execute_plugin_async
+        
+        # Execute tools on the dedicated plugin thread to prevent Playwright thread hopping
+        tasks = [execute_plugin_async(fc.name, fc.args) for fc in turn_tool_calls]
         results = await asyncio.gather(*tasks)
 
         tool_result_parts = []
@@ -441,8 +466,8 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
     # If this is the start of a session (only 1 user msg in history),
     # auto-inject a tactical report to provide JARVIS-style situational awareness.
     if len(get_history()) <= 1:
-        from backend.plugins import execute_plugin
-        diag = execute_plugin("tactical_report", {})
+        from backend.plugins import execute_plugin_async
+        diag = await execute_plugin_async("tactical_report", {})
         add_user_message(f"[STARTUP_DIAGNOSTIC]\n{diag}")
         # Re-build contents to include the diagnostic
         contents = _build_gemini_contents()

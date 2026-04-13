@@ -70,6 +70,9 @@ DEFAULT_CONFIG = {
     "spotify": {
         "client_id": "",
         "client_secret": ""
+    },
+    "audio": {
+        "duck_volume": 0.15
     }
 }
 
@@ -121,7 +124,7 @@ def update_from_dict(new_cfg: dict):
     # sneak into the root instead of staying inside 'assistant'.
     ALLOWED_ROOTS = {
         "assistant", "vad", "whisper", "router", "gemini", 
-        "openai", "ollama", "ai_correction", "tts", "brain", "chrome", "spotify"
+        "openai", "ollama", "ai_correction", "tts", "brain", "chrome", "spotify", "audio"
     }
     
     filtered_cfg = {k: v for k, v in new_cfg.items() if k in ALLOWED_ROOTS}

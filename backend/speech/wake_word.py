@@ -9,6 +9,7 @@ import sys
 import struct
 import tempfile
 import threading
+import re
 from backend.utils.logger import get_logger
 from backend.utils.audio_filters import AudioProcessor
 
@@ -109,6 +110,18 @@ class WakeWordDetector:
         except Exception as e:
             logger.warning(f"[WAKE] Streaming Vosk init failed: {e}. Falling back to slow Whisper mode.")
 
+    def _normalize_wake_text(self, text: str) -> str:
+        """Normalized common mishearings and phonetic variants."""
+        text = text.lower()
+        text = (text.replace("yuuki", "yuki")
+                    .replace("you key", "yuki")
+                    .replace("your key", "yuki")
+                    .replace("eu key", "yuki")
+                    .replace("new key", "yuki"))
+        # Use word-boundary match only — don't replace "uk" inside other words like "book"
+        text = re.sub(r'\buk\b', 'yuki', text)
+        return text
+
     def process_chunk(self, audio_data: bytes) -> bool:
         """
         Non-blocking chunk processing for real-time detection.
@@ -137,7 +150,7 @@ class WakeWordDetector:
                 return False
 
             # Normalize and check
-            text = text.replace("yuuki", "yuki").replace("uk", "yuki")
+            text = self._normalize_wake_text(text)
             for wake_word in self.wake_words:
                 if wake_word in text:
                     logger.info(f"[WAKE] Neural Stream Match: '{wake_word}'")
@@ -199,28 +212,9 @@ class WakeWordDetector:
         """
         import json
 
-        if "vosk" not in globals() or "pyaudio" not in globals():
-            logger.error("Vosk or PyAudio not installed, cannot use STT fallback")
+        if self._vosk_rec is None:
+            logger.error("[WAKE] Vosk recognizer not initialized. Cannot listen.")
             return False
-
-        # Set log level to -1 to disable verbose Kaldi logging
-        vosk.SetLogLevel(-1)
-
-        # Download the model automatically if not cached
-        logger.info("Loading Vosk wake word model (may download ~50MB on first run)...")
-        try:
-            model = vosk.Model(lang="en-us")
-        except Exception as e:
-            logger.error(f"Vosk failed to load model: {e}")
-            return False
-
-        logger.info(f"Vosk loading optimized grammar: {self.wake_words}")
-        # Restrict Vosk to only these words + [unk] catch-all for background noise
-        grammar_list = [w.lower() for w in self.wake_words]
-        grammar_list.append("[unk]")
-        grammar_json = json.dumps(grammar_list)
-
-        rec = vosk.KaldiRecognizer(model, 16000, grammar_json)
 
         pa = pyaudio.PyAudio()
         try:
@@ -256,27 +250,24 @@ class WakeWordDetector:
                 if not self.processor.is_speech(data, sensitivity=self.sensitivity):
                     continue
 
-                if rec.AcceptWaveform(data):
-                    res = json.loads(rec.Result())
+                # Use the pre-loaded recognizer — not a new one
+                if self._vosk_rec.AcceptWaveform(data):
+                    res = json.loads(self._vosk_rec.Result())
                     text = res.get("text", "").lower()
                 else:
-                    res = json.loads(rec.PartialResult())
+                    res = json.loads(self._vosk_rec.PartialResult())
                     text = res.get("partial", "").lower()
 
                 if not text:
                     continue
 
                 # Normalize common mishearings
-                text = (text.replace("yuuki", "yuki")
-                            .replace("you key", "yuki")
-                            .replace("your key", "yuki")
-                            .replace("eu key", "yuki")
-                            .replace("uk", "yuki")
-                            .replace("new key", "yuki"))
+                text = self._normalize_wake_text(text)
 
                 for wake_word in self.wake_words:
                     if wake_word in text:
                         logger.info(f"[WAKE WORD] Vosk matched: '{wake_word}' in '{text}'")
+                        self._vosk_rec.Reset()
                         return True
 
         except Exception as e:

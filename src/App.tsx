@@ -41,7 +41,7 @@ const SHELL_GLOW = {
   speaking: 'rgba(255,50,200,0.12)',
 };
 
-function CosmicField() {
+export function CosmicField() {
   const stars = useMemo(() => Array.from({ length: 200 }, (_, i) => ({
     id: i,
     size: Math.random() < 0.7 ? 1 : Math.random() < 0.85 ? 1.5 : 2.5,
@@ -92,11 +92,12 @@ export default function App() {
   const s = useSettingsStore();
   const [currentPage, setCurrentPage] = useState<Page>('listen');
   const [isMiniMode, setIsMiniMode] = useState<boolean>(false);
+  const [isMaximized, setIsMaximized] = useState<boolean>(false);
 
   // ── Shared voice / agent state ──────────────────────────────────────────
   const [orbState, setOrbState] = useState<OrbState>('idle');
   const [statusLabel, setStatusLabel] = useState<string>('INIT...');
-  
+
   // Update status label when store hydrates
   useEffect(() => {
     if (s.isHydrated && statusLabel === 'INIT...') {
@@ -112,7 +113,7 @@ export default function App() {
   const lastSeqRef = useRef<number>(0);
   const activeTurnRef = useRef<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  
+
   // Initialize greeting after hydration
   useEffect(() => {
     if (s.isHydrated && messages.length === 0) {
@@ -125,10 +126,10 @@ export default function App() {
     }
   }, [s.isHydrated, s.greeting]);
   const [systemStats, setSystemStats] = useState<any>(null);
-  const [systemLogs, setSystemLogs] = useState<{id: string, text: string, ts: Date}[]>([]);
+  const [systemLogs, setSystemLogs] = useState<{ id: string, text: string, ts: Date }[]>([]);
   const [sessionUsage, setSessionUsage] = useState({ input: 0, output: 0, cost: 0.0, turns: 0 });
   const [voiceVolume, setVoiceVolume] = useState(0);
-  
+
   // ── Initial Config Load ──────────────────────────────────────────────────
   useEffect(() => {
     s.loadConfig();
@@ -186,7 +187,7 @@ export default function App() {
             setClarifyQuestion('');
             setClarifyOptions([]);
             // Clear transcription after a moment of idle
-            setTimeout(() => setTranscription(''), 2000); 
+            setTimeout(() => setTranscription(''), 2000);
           }, 800);
           break;
         case 'wake':
@@ -299,6 +300,12 @@ export default function App() {
         case 'status':
           if (msg.data) setSystemStats(msg.data);
           break;
+        case 'window:maximized':
+          setIsMaximized(true);
+          break;
+        case 'window:unmaximized':
+          setIsMaximized(false);
+          break;
         case 'usage_update':
           setSessionUsage({
             input: msg.data?.input || 0,
@@ -404,18 +411,18 @@ export default function App() {
       case 'listen':
         return (
           <ErrorBoundary key={currentPage}>
-            <AgentView 
-              viewMode={currentPage === 'chat' ? 'chat' : 'voice'} 
-              orbState={orbState} 
-              statusLabel={statusLabel} 
-              transcription={transcription} 
-              messages={messages} 
-              clarifyQuestion={clarifyQuestion} 
-              clarifyOptions={clarifyOptions} 
-              isHotListening={isHotListening} 
-              onTrigger={handleTrigger} 
-              onSendMessage={handleSendMessage} 
-              onChoice={handleChoice} 
+            <AgentView
+              viewMode={currentPage === 'chat' ? 'chat' : 'voice'}
+              orbState={orbState}
+              statusLabel={statusLabel}
+              transcription={transcription}
+              messages={messages}
+              clarifyQuestion={clarifyQuestion}
+              clarifyOptions={clarifyOptions}
+              isHotListening={isHotListening}
+              onTrigger={handleTrigger}
+              onSendMessage={handleSendMessage}
+              onChoice={handleChoice}
               selectedProvider={s.brainProvider}
               onProviderChange={handleProviderChange}
             />
@@ -459,14 +466,14 @@ export default function App() {
 
       {/* Global Persistent Energy Orb */}
       <div className={`fixed transition-all duration-1000 ease-[cubic-bezier(0.2,0.8,0.2,1)] z-[100] pointer-events-none flex items-center justify-center
-        ${(currentPage === 'listen' || currentPage === 'chat') 
-           ? 'top-[28px] bottom-0 left-[200px] right-0' 
-           : 'right-10 bottom-10 scale-50 opacity-40 hover:opacity-100 animate-fade-in'}`}
+        ${(currentPage === 'listen' || currentPage === 'chat')
+          ? 'top-[28px] bottom-0 left-[200px] right-0'
+          : 'right-10 bottom-10 scale-50 opacity-40 hover:opacity-100 animate-fade-in'}`}
       >
         <div className="pointer-events-auto flex items-center justify-center">
-          <EnergyOrb 
-            orbState={orbState} 
-            isHotListening={isHotListening} 
+          <EnergyOrb
+            orbState={orbState}
+            isHotListening={isHotListening}
             onTrigger={handleTrigger}
             variant={(currentPage === 'listen' || currentPage === 'chat') ? 'focus' : 'ambient'}
             volume={voiceVolume}
@@ -482,8 +489,18 @@ export default function App() {
           YUKI.SYS / {currentPage.toUpperCase()}
         </div>
         <div className="flex gap-4 no-drag-region items-center">
-          <span onClick={() => window.yukiAPI?.minimize?.()} className="material-symbols-outlined text-primary text-[14px] cursor-pointer hover:text-white transition-colors" title='Minimize'>remove</span>
-          <span onClick={() => window.yukiAPI?.maximize?.()} className="material-symbols-outlined text-primary text-[14px] cursor-pointer hover:text-white transition-colors" title='Maximize'>check_box_outline_blank</span>
+          <span onClick={() => {
+            setIsMiniMode(true);
+            window.yukiAPI?.setMode?.('mini');
+          }} className="material-symbols-outlined text-primary text-[14px] cursor-pointer hover:text-white transition-colors" title='Minimize to Widget'>
+            remove
+          </span>
+          <span onClick={() => {
+            window.yukiAPI?.maximize?.();
+            setIsMaximized(prev => !prev);
+          }} className="material-symbols-outlined text-primary text-[14px] cursor-pointer hover:text-white transition-colors" title={isMaximized ? 'Restore' : 'Maximize'}>
+            {isMaximized ? 'filter_none' : 'check_box_outline_blank'}
+          </span>
           <span onClick={() => window.yukiAPI?.close?.()} className="material-symbols-outlined text-primary text-[14px] cursor-pointer hover:text-error transition-colors" title='Close'>close</span>
         </div>
       </header>

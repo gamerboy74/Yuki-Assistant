@@ -197,7 +197,7 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
             ],
         }
 
-        from backend.plugins import execute_plugin
+        from backend.plugins import execute_plugin_async
 
         tool_result_msgs: list[dict] = []
         for tc in current_tool_calls.values():
@@ -211,7 +211,12 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
                 except Exception as e:
                     logger.warning(f"[OPENAI] Tool argument parse failed: {e}")
                     args = {}
-                res = await asyncio.to_thread(execute_plugin, tc["name"], args)
+                
+                # Use dedicated thread pool to prevent Playwright greenlet bugs
+                
+                # We do them sequentially for OpenAI out of simplicity for now, or parallel
+                # but await execute_plugin_async is safe.
+                res = await execute_plugin_async(tc["name"], args)
                 executed_tool_calls[signature] = res
                 
                 # Behavioral Learning: Track successful execution to learn user patterns

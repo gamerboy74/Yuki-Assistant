@@ -18,11 +18,18 @@ from __future__ import annotations
 import importlib
 import os
 import pkgutil
+import asyncio
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor
 from backend.utils.logger import get_logger
 from backend.plugins._base import Plugin
 
 logger = get_logger(__name__)
+
+# A dedicated single-worker thread pool for all plugin execution.
+# This ensures that synchronous tools (especially Playwright) are always run
+# on the exact same thread, preventing greenlet "Cannot switch to a different thread" errors.
+_plugin_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="yuki_plugin_worker")
 
 # ── Registry ──────────────────────────────────────────────────────────────────
 _registry: dict[str, Plugin] = {}
@@ -106,3 +113,8 @@ def execute_plugin(name: str, params: dict | str) -> str:
     except Exception as e:
         logger.error(f"[PLUGINS] {name} error: {e}")
         return f"Plugin '{name}' failed: {str(e)[:150]}"
+
+async def execute_plugin_async(name: str, params: dict | str) -> str:
+    """Execute a plugin asynchronously on the dedicated plugin thread."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_plugin_executor, execute_plugin, name, params)

@@ -92,12 +92,29 @@ class OpenAppPlugin(Plugin):
             # Focus Stabilization: Give Windows time to launch and focus the GUI
             if name in ["notepad", "word", "excel", "spotify", "discord", "chrome"]:
                 import time
-                time.sleep(1.5)
+                time.sleep(2.5)  # Increased from 1.5s — gives Notepad time to fully init
+
+            # ── Notepad Focus Lock ──
+            # After launch, actively bring Notepad to the foreground so subsequent
+            # type_text calls land in Notepad, not the Electron window.
+            if name == "notepad":
+                try:
+                    import pygetwindow as gw
+                    wins = gw.getWindowsWithTitle("Notepad")
+                    if wins:
+                        w = wins[-1]  # Get the most recently opened Notepad
+                        w.restore()
+                        w.activate()
+                        import time; time.sleep(0.3)
+                        logger.info(f"[OPEN_APP] Notepad focused: '{w.title}'")
+                except Exception as focus_err:
+                    logger.warning(f"[OPEN_APP] Could not focus Notepad: {focus_err}")
                 
             return f"Opening {name}."
         except Exception as e:
             logger.error(f"[OPEN_APP] Failed: {e}")
             return f"Failed to open {name}."
+
 
 class CloseAppPlugin(Plugin):
     name = "close_app"

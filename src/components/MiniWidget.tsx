@@ -1,220 +1,200 @@
 /**
- * MiniWidget.tsx — Yuki compact floating pill
+ * MiniWidget.tsx — Yuki compact floating pill (v4)
  *
- * A true glassmorphism pill that floats over the desktop.
- * Shows live state (idle / listening / processing / speaking).
- * Reads the assistant name from yuki.config.json via useConfig.
+ * Design principles (senior dev approach):
+ * ─────────────────────────────────────────
+ * 1. The Electron window is transparent + frameless at 480×80px.
+ * 2. THIS component draws the actual rounded pill — giving us full
+ *    design control (rounded corners, glow, backdrop, shadows).
+ * 3. The pill floats over a fully transparent window background.
+ * 4. Matches the cosmic HUD aesthetic of the main App.tsx exactly.
+ * 5. The EnergyOrb is scaled down and clipped — same component, no dupe code.
  */
+
 import { useEffect } from 'react';
 import { useSettingsStore } from '../store/settingsStore';
 import type { OrbState } from '../App';
+import { EnergyOrb } from './common/EnergyOrb';
 
 interface MiniWidgetProps {
   onTrigger: () => void;
-  onExpand:  () => void;
-  onClose:   () => void;
-  orbState:  OrbState;
+  onExpand: () => void;
+  onClose: () => void;
+  orbState: OrbState;
 }
 
-/* Per-state visual tokens */
+/* Per-state visual tokens — mirrors App.tsx SHELL_GLOW palette */
 const STATE = {
   idle: {
-    color:  '#8ff5ff',
-    dot:    'bg-[#8ff5ff]/40',
-    label:  'READY',
-    pulse:  false,
-    icon:   'graphic_eq',
-    border: 'rgba(143,245,255,0.22)',
-    glow:   'rgba(143,245,255,0.12)',
+    color: '#8ff5ff',
+    accent: 'rgba(143,245,255,0.18)',
+    label: 'READY',
+    dot: 'bg-cyan-300/50',
+    pulse: false,
   },
   listening: {
-    color:  '#8ff5ff',
-    dot:    'bg-[#8ff5ff]',
-    label:  'LISTENING',
-    pulse:  true,
-    icon:   'mic',
-    border: 'rgba(143,245,255,0.35)',
-    glow:   'rgba(143,245,255,0.15)',
+    color: '#8ff5ff',
+    accent: 'rgba(143,245,255,0.32)',
+    label: 'LISTENING',
+    dot: 'bg-cyan-300',
+    pulse: true,
   },
   processing: {
-    color:  '#fbbf24',
-    dot:    'bg-amber-400',
-    label:  'THINKING',
-    pulse:  true,
-    icon:   'cognition',
-    border: 'rgba(251,191,36,0.30)',
-    glow:   'rgba(251,191,36,0.10)',
+    color: '#fbbf24',
+    accent: 'rgba(251,191,36,0.28)',
+    label: 'THINKING',
+    dot: 'bg-amber-400',
+    pulse: true,
   },
   speaking: {
-    color:  '#34d399',
-    dot:    'bg-emerald-400',
-    label:  'SPEAKING',
-    pulse:  true,
-    icon:   'volume_up',
-    border: 'rgba(52,211,153,0.30)',
-    glow:   'rgba(52,211,153,0.10)',
+    color: '#ff32c8',
+    accent: 'rgba(255,50,200,0.28)',
+    label: 'SPEAKING',
+    dot: 'bg-pink-400',
+    pulse: true,
   },
 };
 
 export default function MiniWidget({ onTrigger, onExpand, onClose, orbState }: MiniWidgetProps) {
   const { assistantName: name, loadConfig } = useSettingsStore();
-
-  useEffect(() => {
-    loadConfig();
-  }, []);
   const s = STATE[orbState];
+
+  useEffect(() => { loadConfig(); }, []);
 
   /* Alt+Space shortcut */
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.altKey && e.code === 'Space') { e.preventDefault(); window.yukiAPI?.trigger(); }
+    const h = (e: KeyboardEvent) => {
+      if (e.altKey && e.code === 'Space') { e.preventDefault(); onTrigger(); }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [onTrigger]);
 
   return (
-    /* Full-screen centering wrapper — background intentionally transparent */
-    <div className="h-screen w-full flex items-center justify-center overflow-hidden drag-region">
+    /*
+      Root = transparent full-window canvas (Electron window is frameless+transparent).
+      The pill floats inside with rounded corners + shadow — THIS is what gives
+      the appearance of a floating rounded widget, not the OS window.
+    */
+    <div className="h-screen w-full flex items-end justify-center pb-2 overflow-hidden">
 
-      {/* ── Floating Pill ───────────────────────────────────────────────────── */}
+      {/* ── The Pill ──────────────────────────────────────────────────────────── */}
       <div
-        className="relative group drag-region"
-        style={{ filter: `drop-shadow(0 12px 40px ${s.glow})` }}
+        className="
+          relative w-full mx-2 h-[68px]
+          flex items-center gap-3 px-3
+          rounded-[20px] overflow-hidden
+          drag-region
+        "
+        style={{
+          /* Deep space base matching App.tsx #00000f */
+          background: `
+            radial-gradient(ellipse 80% 120% at 10% 50%, rgba(120,0,180,0.22) 0%, transparent 65%),
+            radial-gradient(ellipse 60% 100% at 90% 50%, rgba(0,80,200,0.18) 0%, transparent 65%),
+            linear-gradient(135deg, #0a0a14 0%, #06050f 100%)
+          `,
+          /* State-reactive glowing border */
+          border: `1px solid ${s.accent}`,
+          /* Soft drop shadow matching the cosmic glow */
+          boxShadow: `
+            0 8px 32px rgba(0,0,0,0.7),
+            0 2px 8px rgba(0,0,0,0.5),
+            inset 0 1px 0 rgba(255,255,255,0.06),
+            0 0 20px ${s.accent}
+          `,
+          backdropFilter: 'blur(24px)',
+        }}
       >
-
-        {/* Outer glow ring — only visible when active */}
+        {/* Reactive state-colour gradient wash over the pill */}
         <div
-          className="absolute -inset-px rounded-2xl pointer-events-none transition-all duration-700"
+          className="absolute inset-0 pointer-events-none transition-all duration-700 rounded-[20px]"
           style={{
-            boxShadow: orbState !== 'idle'
-              ? `0 0 0 1px ${s.border}, 0 0 20px ${s.glow}`
-              : 'none',
-            borderRadius: 'inherit',
+            background: `radial-gradient(ellipse 50% 120% at 0% 50%, ${s.color}10 0%, transparent 70%)`,
           }}
         />
 
-        {/* Pill body — true glassmorphism */}
+        {/* ── Energy Orb (scaled) ──────────────────────────────────────── */}
         <div
-          className="glass-mini relative flex items-center gap-3 px-4 py-3 rounded-2xl pointer-events-auto transition-all duration-500"
+          className="relative flex-shrink-0 no-drag-region"
           style={{
-            borderColor: s.border,
-            minWidth: 320,
-            backgroundColor: 'rgba(12, 14, 18, 0.86)',
-            backgroundImage: `linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.00)), radial-gradient(circle at top right, ${s.color}14 0%, transparent 65%)`,
-            backdropFilter: 'blur(18px) saturate(170%)',
-            WebkitBackdropFilter: 'blur(18px) saturate(170%)',
-            boxShadow: `0 12px 36px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px ${s.border}`,
+            width: 56,
+            height: 56,
+            /* Clip the oversized scaled orb to its container */
+            overflow: 'hidden',
+            borderRadius: '50%',
           }}
         >
-          {/* Subtle decorative "HUD" pattern */}
-          <div className="absolute inset-0 pointer-events-none opacity-[0.06] dot-grid rounded-[inherit]" />
-
-          {/* ── Left: Orb + Name + State ─────────────────────────────────── */}
-          <div className="flex items-center gap-3 flex-1 min-w-0">
-
-            {/* Mini orb */}
-            <button
-              onClick={onTrigger}
-              className="relative flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300 hover:scale-110 focus:outline-none no-drag-region"
-              style={{
-                background: `radial-gradient(circle at 35% 35%, ${s.color}25 0%, ${s.color}08 60%, transparent)`,
-                border: `1px solid ${s.color}50`,
-                boxShadow: orbState !== 'idle' ? `0 0 16px ${s.color}30` : 'none',
-              }}
-              title="Trigger voice"
-            >
-              {/* Spinning ring for processing */}
-              {orbState === 'processing' && (
-                <div
-                  className="absolute inset-0 rounded-full"
-                  style={{
-                    border: '1.5px solid transparent',
-                    borderTopColor: s.color,
-                    animation: 'spin 1.5s linear infinite',
-                  }}
-                />
-              )}
-              <span
-                className="material-symbols-outlined text-lg transition-all duration-300"
-                style={{
-                  fontSize: 18,
-                  color: s.color,
-                  fontVariationSettings: "'FILL' 1",
-                  filter: `drop-shadow(0 0 6px ${s.color}80)`,
-                }}
-              >
-                {s.icon}
-              </span>
-
-              {/* Listening waveform bars inside orb */}
-              {orbState === 'listening' && (
-                <span
-                  className="absolute inset-0 rounded-full"
-                  style={{ background: `${s.color}08` }}
-                />
-              )}
-            </button>
-
-            {/* Name + state */}
-            <div className="flex flex-col min-w-0">
-              <span
-                className="font-headline text-sm font-semibold tracking-tight leading-tight truncate"
-                style={{ color: s.color }}
-              >
-                {name}
-              </span>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span
-                  className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${s.dot} ${s.pulse ? 'animate-pulse' : ''}`}
-                />
-                <span
-                  className="text-[9px] font-bold tracking-[0.2em] uppercase"
-                  style={{ color: `${s.color}90` }}
-                >
-                  {s.label}
-                </span>
-              </div>
-            </div>
+          {/* Scale the 180px ambient orb down to 56px */}
+          <div style={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%) scale(0.31)',
+            transformOrigin: 'center',
+            pointerEvents: 'auto',
+          }}>
+            <EnergyOrb
+              orbState={orbState}
+              onTrigger={onTrigger}
+              variant="ambient"
+            />
           </div>
-
-          {/* ── Divider ──────────────────────────────────────────────────── */}
-          <div className="w-px h-6 bg-white/[0.14] flex-shrink-0" />
-
-          {/* ── Right: Action buttons ─────────────────────────────────────  */}
-          <div className="flex items-center gap-0.5 flex-shrink-0 no-drag-region">
-
-            {/* Expand */}
-            <button
-              onClick={onExpand}
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-white/30 hover:text-white/70 hover:bg-white/[0.06] transition-all duration-200"
-              title="Expand"
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>open_in_full</span>
-            </button>
-
-            {/* Close */}
-            <button
-              onClick={onClose}
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-white/20 hover:text-red-400/80 hover:bg-red-500/[0.08] transition-all duration-200"
-              title="Close"
-            >
-              <span className="material-symbols-outlined" style={{ fontSize: 16 }}>close</span>
-            </button>
-          </div>
-
         </div>
 
-        {/* ── Hover hint ─────────────────────────────────────────────────── */}
-        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none whitespace-nowrap">
-          <div className="glass-mini px-3 py-1.5 rounded-full flex items-center gap-2">
-            <span className="material-symbols-outlined text-[11px]" style={{ color: s.color }}>keyboard</span>
-            <span className="text-[10px] text-white/50 tracking-wide">
-              <kbd className="text-white/70 font-sans">Alt + Space</kbd> to activate
+        {/* ── Name + State label ───────────────────────────────────────── */}
+        <div className="flex flex-col min-w-0 flex-1 z-10">
+          <span
+            className="text-sm font-bold tracking-tight leading-tight truncate"
+            style={{
+              color: s.color,
+              fontFamily: "'Outfit', sans-serif",
+              letterSpacing: '-0.01em',
+            }}
+          >
+            {name}
+          </span>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span
+              className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${s.dot} ${s.pulse ? 'animate-pulse' : ''}`}
+            />
+            <span
+              className="text-[9px] font-bold tracking-[0.2em] uppercase"
+              style={{ color: `${s.color}99`, fontFamily: "'Outfit', sans-serif" }}
+            >
+              {s.label}
             </span>
           </div>
         </div>
 
+        {/* ── Divider ──────────────────────────────────────────────────── */}
+        <div className="w-px self-stretch my-3 bg-white/10 flex-shrink-0 z-10" />
+
+        {/* ── Action Buttons ───────────────────────────────────────────── */}
+        <div className="flex items-center gap-1 flex-shrink-0 z-10 no-drag-region">
+          {/* Expand → full window */}
+          <button
+            onClick={onExpand}
+            className="w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200"
+            style={{ color: 'rgba(255,255,255,0.55)' }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#fff', e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
+            onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.55)', e.currentTarget.style.background = 'transparent')}
+            title="Expand to full window"
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 17 }}>open_in_full</span>
+          </button>
+
+          {/* Close widget */}
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200"
+            style={{ color: 'rgba(255,255,255,0.55)' }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#f87171', e.currentTarget.style.background = 'rgba(239,68,68,0.10)')}
+            onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.55)', e.currentTarget.style.background = 'transparent')}
+            title="Hide widget"
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: 17 }}>close</span>
+          </button>
+        </div>
       </div>
     </div>
   );

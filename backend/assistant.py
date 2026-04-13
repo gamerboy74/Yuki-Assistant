@@ -4,6 +4,8 @@ import json
 import asyncio
 import threading
 import time
+import atexit
+import signal
 from dotenv import load_dotenv
 
 # Path setup
@@ -68,6 +70,12 @@ async def monitor_loop(stop_event: asyncio.Event):
 
 async def main():
     """Entry point for the HP Yuki Voice Assistant."""
+    # --- Global Optimization: HuggingFace Token ---
+    hf_token = os.environ.get("HF_TOKEN")
+    if hf_token:
+        os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
+        logger.info("[BOOT] HuggingFace token configured for neural pipelines.")
+        
     logger.info("Initializing Yuki HP System...")
     _log_event("Initializing Yuki HP System...")
     
@@ -182,6 +190,8 @@ async def main():
                     v_prov = data.get("provider", "edge-tts")
                     text = data.get("text", "Neural Link Established. This is a preview of my current vocal configuration.")
                     asyncio.run_coroutine_threadsafe(orchestrator.handle_preview_voice(text, v_id, v_prov), loop)
+                elif data.get("type") == "confirmed":
+                    orchestrator.signal_confirmation()
                 elif data.get("type") == "purge_memory":
                     mem.clear_all()
                     logger.info("Memory vault purged.")
@@ -240,10 +250,34 @@ async def main():
     await stop_event.wait()
     orchestrator.stop()
 
+def _emergency_audio_restore():
+    """Guaranteed audio restore on process exit — fires even on SIGINT/SIGTERM/crash."""
+    try:
+        from backend.utils.audio_duck import force_restore
+        force_restore()
+        logger.info("[SHUTDOWN] Audio restored on exit.")
+    except Exception:
+        pass  # Silent fail — process is shutting down anyway
+
+# Register guaranteed audio restore — runs on ANY exit path
+atexit.register(_emergency_audio_restore)
+
 if __name__ == "__main__":
+    # Handle Electron's SIGTERM gracefully (Windows sends this on window close)
+    def _sigterm_handler(sig, frame):
+        logger.info("[SHUTDOWN] SIGTERM received. Restoring audio and exiting.")
+        _emergency_audio_restore()
+        sys.exit(0)
+    
+    try:
+        signal.signal(signal.SIGTERM, _sigterm_handler)
+    except (OSError, ValueError):
+        pass  # SIGTERM not available on all platforms
+
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        pass
+        # SIGINT (Ctrl+C or Electron close) — audio is restored by atexit
+        logger.info("[SHUTDOWN] KeyboardInterrupt — cleaning up.")
     except Exception:
         logger.exception("Fatal startup error in main loop")
