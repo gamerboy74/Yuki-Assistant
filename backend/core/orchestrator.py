@@ -90,6 +90,7 @@ class YukiOrchestrator:
         self.session_usage = {
             "input": 0,
             "output": 0,
+            "cached": 0,
             "cost": 0.0,
             "turns": 0
         }
@@ -632,7 +633,7 @@ class YukiOrchestrator:
     def _get_current_timeout(self) -> float:
         """Returns either standard timeout or an extended one if Yuki asked a question."""
         base = self.active_mode_timeout_sec
-        if getattr(self, "_last_was_question", False):
+        if self._last_was_question:
             # Give significantly more time for answering a question (e.g. 20s)
             return base * 2.5 
         return base
@@ -871,20 +872,34 @@ class YukiOrchestrator:
 
     async def fire_proactive_alert(self, message: str):
         """
-        Main entry point for background system alerts.
-        Ensures thread-safe UI state transitions and speech.
+        Main entry point for autonomous background alerts (Proactive Agent).
+        These inject context into memory to keep the AI updated on system state.
+        """
+        await self._fire_system_alert(message, turn_id="proactive-alert", inject_memory=True)
+
+    async def _speak_alert(self, text: str, turn_id: str = "system-alert"):
+        """
+        Standard system acknowledgments ("At your service", "Listening").
+        Fires UI and Voice but does NOT inject into brain memory.
+        """
+        await self._fire_system_alert(text, turn_id=turn_id, inject_memory=False)
+
+    async def _fire_system_alert(self, message: str, turn_id: str, inject_memory: bool = False):
+        """
+        Internal core for all system speech/UI events outside the main brain loop.
+        Ensures thread-safe UI state transitions and synthesized voice.
         """
         async with self._proactive_lock:
-            turn_id = "proactive-alert"
             mode_before = self.mode
             self._begin_speaking()
-            duck() # System dimming for proactive alerts
+            duck() 
             try:
-                # 1. Start Alert (UI)
+                # 1. UI Event
                 self._emit("speaking", turn_id=turn_id)
-                self._emit("response", turn_id=turn_id, text=f"⚠️ {message}")
+                prefix = "⚠️ " if inject_memory else "" # Add warning icon only for proactive alerts
+                self._emit("response", turn_id=turn_id, text=f"{prefix}{message}")
                 
-                # 2. Voice Alert
+                # 2. Voice Output
                 from backend.speech import synthesis as cloud_tts
                 if self.use_elevenlabs_tts:
                     path = await cloud_tts.synthesize_to_file_async(message)
@@ -897,49 +912,46 @@ class YukiOrchestrator:
                 else:
                     await self._speak_local_with_interrupt(message, turn_id=turn_id)
 
-                # 3. Context Injection
-                from backend.brain import shared
-                shared.add_assistant_message(f"[Proactive] {message}")
+                # 3. Memory Injection (Isolated from system acknowledgments)
+                if inject_memory:
+                    from backend.brain import shared
+                    shared.add_assistant_message(f"[Proactive] {message}")
 
-                # 4. Mode Persistence/Switching
+                # 4. Mode Logic
                 is_question = message.strip().endswith("?")
                 if is_question:
                     self.mode = "active"
                     self._active_since = time.monotonic()
-                    logger.info("[PROACTIVE] Question detected. Entering active listener window.")
+                    logger.info(f"[{turn_id.upper()}] Question detected. Entering active listener window.")
                 elif mode_before == "idle":
-                    # Transition back to idle (wake word) state
                     self.mode = "idle"
                     self._emit("idle")
                     self._active_since = 0.0
 
-                # 5. Autonomous Recovery Logic
-                if "ram" in message.lower():
-                    logger.info("[ORCHESTRATOR] Autonomous RAM recovery triggered.")
-                    try:
-                        from backend.plugins.browser import BrowserHygienePlugin
-                        hygiene = BrowserHygienePlugin()
-                        # Use to_thread since browser operations are sync but use playwright under the hood
-                        # though BrowserPlugin uses sync_playwright, so we should be careful.
-                        res = await asyncio.to_thread(hygiene.execute)
-                        logger.info(f"[ORCHESTRATOR] RAM Recovery Result: {res}")
-                        self._log(f"Autonomous memory cleanup complete: {res}")
-                    except Exception as he:
-                        logger.error(f"Autonomous RAM recovery failed: {he}")
+                # 5. Autonomous Recovery Logic (Only for RAM/Health messages)
+                if inject_memory and "ram" in message.lower():
+                    from backend.plugins import browser as browser_mod
+                    if browser_mod._failure_count < browser_mod._CIRCUIT_LIMIT:
+                        logger.info("[ORCHESTRATOR] Autonomous RAM recovery triggered.")
+                        try:
+                            from backend.plugins.browser import BrowserHygienePlugin
+                            hygiene = BrowserHygienePlugin()
+                            res = await asyncio.to_thread(hygiene.execute)
+                            logger.info(f"[ORCHESTRATOR] RAM Recovery Result: {res}")
+                            self._log(f"Autonomous memory cleanup complete: {res}")
+                        except Exception as he:
+                            logger.error(f"Autonomous RAM recovery failed: {he}")
+                    else:
+                        logger.warning("[ORCHESTRATOR] Autonomous RAM recovery skipped: Browser circuit breaker open.")
 
             except Exception as e:
-                logger.error(f"[ORCHESTRATOR] Proactive alert failed: {e}")
+                logger.error(f"[ORCHESTRATOR] System alert failed: {e}")
             finally:
-                # 5. Cleanup Alert (UI)
                 self._emit("idle", turn_id=turn_id)
                 if getattr(self, "is_speaking", False):
                     unduck()
                 self._end_speaking()
-                logger.info(f"[PROACTIVE] Alert finished: {message[:30]}...")
-
-    async def _speak_alert(self, text: str, turn_id: str = "system-alert"):
-        """Legacy path for immediate non-proactive alerts."""
-        await self.fire_proactive_alert(text)
+                logger.info(f"[{turn_id.upper()}] Alert finished: {message[:30]}...")
 
     async def _speak_local_with_interrupt(self, text: str, turn_id: str | None = None):
         """Plays local TTS (Kokoro/Edge) handling interruptions."""

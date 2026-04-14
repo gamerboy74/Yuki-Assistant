@@ -26,7 +26,7 @@ from backend.brain.shared import (
     get_openai_messages,
 )
 from backend.brain.tools import get_tools_for_query
-from backend.brain.reasoning import reason, track_execution
+from backend.brain.reasoning import reason_async, track_execution
 from backend import memory as mem
 from backend.config import cfg
 
@@ -78,7 +78,7 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
     # ── Reasoning Layer (JARVIS-style pre-processing) ──────────────────────────
     user_data    = mem.get_user()
     all_memories = [m for m in mem.get_all_memories()]
-    result = reason(
+    result = await reason_async(
         transcript,
         all_memories,
         user_location=user_data.get("location", ""),

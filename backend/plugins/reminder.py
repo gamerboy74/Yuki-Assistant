@@ -10,24 +10,23 @@ logger = get_logger(__name__)
 
 
 class ReminderPlugin(Plugin):
-    name = "reminder"
-    description = "Set a timed reminder. Shows a Windows toast notification after the specified delay."
+    name = "set_reminder"
+    description = "Set a timed reminder. Supports relative ('10m', '1h') or absolute ('5pm') times."
     parameters = {
-        "text": {
-            "type": "string",
-            "description": "What to remind the user about",
-            "required": True,
-        },
-        "delay_minutes": {
-            "type": "integer",
-            "description": "Number of minutes from now",
-            "required": True,
-        },
+        "text": {"type": "string", "description": "What to remind you about", "required": True},
+        "at_time": {"type": "string", "description": "When (e.g., 'in 5m', 'at 6pm')", "required": True}
     }
 
-    def execute(self, text: str = "Reminder!", delay_minutes: int = 1, **_) -> str:
-        delay_minutes = max(0, int(delay_minutes))
-        delay_secs = delay_minutes * 60
+    def execute(self, text: str = "Reminder!", at_time: str = "1m", **_) -> str:
+        # Simple parser for "10m", "1h", etc.
+        import re
+        delay_secs = 60 # fallback
+        try:
+            val = int(re.search(r"\d+", at_time).group())
+            if "h" in at_time.lower(): delay_secs = val * 3600
+            elif "s" in at_time.lower(): delay_secs = val
+            else: delay_secs = val * 60 # default to minutes
+        except: pass
 
         def _show_toast():
             time.sleep(delay_secs)
@@ -51,11 +50,4 @@ class ReminderPlugin(Plugin):
         t = threading.Thread(target=_show_toast, daemon=True)
         t.start()
 
-        if delay_minutes < 1:
-            when = f"{int(delay_secs)}s"
-        elif delay_minutes == 1:
-            when = "1 minute"
-        else:
-            when = f"{delay_minutes} minutes"
-
-        return f"I'll remind you about '{text}' in {when}."
+        return f"I'll remind you about '{text}' in {at_time}."

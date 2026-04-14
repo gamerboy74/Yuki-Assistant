@@ -489,36 +489,19 @@ export default function App() {
           YUKI.SYS / {currentPage.toUpperCase()}
         </div>
         <div className="flex gap-4 no-drag-region items-center">
-          <span
-            onClick={() => { setIsMiniMode(true); window.yukiAPI?.setMode?.('mini'); }}
-            tabIndex={0}
-            role="button"
-            onKeyDown={e => e.key === 'Enter' && (setIsMiniMode(true), window.yukiAPI?.setMode?.('mini'))}
-            className="material-symbols-outlined text-primary text-[14px] cursor-pointer hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 rounded-sm"
-            title='Minimize to Widget'
-          >
+          <span onClick={() => {
+            setIsMiniMode(true);
+            window.yukiAPI?.setMode?.('mini');
+          }} className="material-symbols-outlined text-primary text-[14px] cursor-pointer hover:text-white transition-colors" title='Minimize to Widget'>
             remove
           </span>
-          <span
-            onClick={() => { window.yukiAPI?.maximize?.(); setIsMaximized(prev => !prev); }}
-            tabIndex={0}
-            role="button"
-            onKeyDown={e => e.key === 'Enter' && (window.yukiAPI?.maximize?.(), setIsMaximized(prev => !prev))}
-            className="material-symbols-outlined text-primary text-[14px] cursor-pointer hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 rounded-sm"
-            title={isMaximized ? 'Restore' : 'Maximize'}
-          >
+          <span onClick={() => {
+            window.yukiAPI?.maximize?.();
+            setIsMaximized(prev => !prev);
+          }} className="material-symbols-outlined text-primary text-[14px] cursor-pointer hover:text-white transition-colors" title={isMaximized ? 'Restore' : 'Maximize'}>
             {isMaximized ? 'close_fullscreen' : 'open_in_full'}
           </span>
-          <span
-            onClick={() => window.yukiAPI?.close?.()}
-            tabIndex={0}
-            role="button"
-            onKeyDown={e => e.key === 'Enter' && window.yukiAPI?.close?.()}
-            className="material-symbols-outlined text-primary text-[14px] cursor-pointer hover:text-error transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/60 rounded-sm"
-            title='Close'
-          >
-            close
-          </span>
+          <span onClick={() => window.yukiAPI?.close?.()} className="material-symbols-outlined text-primary text-[14px] cursor-pointer hover:text-error transition-colors" title='Close'>close</span>
         </div>
       </header>
 
@@ -540,7 +523,7 @@ export default function App() {
                 const isActive = currentPage === tab.id || (currentPage === 'chat' && tab.id === 'listen');
                 return (
                   <button key={tab.id} onClick={() => navigateTo(tab.id)}
-                    className={`flex items-center font-label text-[12px] font-medium pl-4 py-3 transition-all duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/50 focus-visible:ring-inset ${isActive ? 'text-primary border-l-2 border-primary bg-white/5' : 'text-secondary opacity-60 hover:opacity-100 hover:bg-white/5'}`}>
+                    className={`flex items-center font-label text-[12px] font-medium pl-4 py-3 transition-all duration-150 ${isActive ? 'text-primary border-l-2 border-primary bg-white/5' : 'text-secondary opacity-60 hover:opacity-100 hover:bg-white/5'}`}>
                     <span className="material-symbols-outlined align-middle mr-2 text-[18px]">{tab.icon}</span>
                     {tab.label}
                   </button>
@@ -554,44 +537,24 @@ export default function App() {
               <div className="font-label text-[10px] text-primary-fixed mb-1 uppercase">Orb Mode</div>
               <div className="text-[10px] font-label text-on-surface-variant truncate uppercase">{orbState}</div>
             </div>
-            <button
-              onClick={handleTrigger}
-              className={`w-full py-3 font-headline font-bold text-xs tracking-widest transition-all relative overflow-hidden group flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-offset-black focus-visible:ring-primary/80 ${orbState === 'listening' ? 'bg-error text-on-error hover:bg-error-container shadow-[0_0_20px_rgba(255,110,132,0.4)]' : 'bg-primary text-on-primary hover:bg-primary-dim'}`}
-              style={orbState !== 'listening' ? { boxShadow: '0 0 16px rgba(204,151,255,0.25)' } : {}}
+            <button 
+              onClick={handleTrigger} 
+              className={`w-full py-3 font-headline font-bold text-xs tracking-widest transition-all duration-500 relative overflow-hidden group 
+                ${orbState === 'listening' 
+                  ? 'bg-error text-on-error hover:bg-error-container shadow-[0_0_25px_rgba(255,110,132,0.4)]' 
+                  : 'bg-primary text-on-primary hover:bg-primary-dim shadow-[0_0_15px_rgba(204,151,255,0.2)] hover:shadow-[0_0_25px_rgba(204,151,255,0.4)]'}`}
             >
-              <span
-                className={`material-symbols-outlined text-[16px] ${
-                  orbState === 'listening' ? '' : 'animate-pulse'
-                }`}
-                style={{ fontVariationSettings: "'FILL' 1" }}
-              >
-                {orbState === 'listening' ? 'cancel' : 'mic'}
-              </span>
-              {orbState === 'listening' ? 'CANCEL' : 'TRIGGER'}
+              <div className="flex items-center justify-center gap-2 relative z-10">
+                {orbState === 'listening' && <span className="material-symbols-outlined text-[14px] animate-pulse">mic</span>}
+                <span>{orbState === 'listening' ? 'CANCEL' : 'TRIGGER'}</span>
+              </div>
+              <div className={`absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity`} />
             </button>
           </div>
 
           <div className="border-t border-outline-variant/10 px-4 py-4 flex gap-4">
-            <span
-              onClick={() => { setIsMiniMode(true); window.yukiAPI?.setMode?.('mini'); }}
-              tabIndex={0}
-              role="button"
-              onKeyDown={e => e.key === 'Enter' && (setIsMiniMode(true), window.yukiAPI?.setMode?.('mini'))}
-              className="material-symbols-outlined text-secondary opacity-60 cursor-pointer hover:opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 rounded-sm"
-              title="Mini Mode"
-            >
-              picture_in_picture_alt
-            </span>
-            <span
-              onClick={() => window.yukiAPI?.close?.()}
-              tabIndex={0}
-              role="button"
-              onKeyDown={e => e.key === 'Enter' && window.yukiAPI?.close?.()}
-              className="material-symbols-outlined text-secondary opacity-60 cursor-pointer hover:text-error transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-error/60 rounded-sm"
-              title="Shutdown"
-            >
-              power_settings_new
-            </span>
+            <span onClick={() => { setIsMiniMode(true); window.yukiAPI?.setMode?.('mini'); }} className="material-symbols-outlined text-secondary opacity-60 cursor-pointer hover:opacity-100 transition-opacity" title="Mini Mode">picture_in_picture_alt</span>
+            <span onClick={() => window.yukiAPI?.close?.()} className="material-symbols-outlined text-secondary opacity-60 cursor-pointer hover:text-error transition-colors" title="Shutdown">power_settings_new</span>
           </div>
         </aside>
 

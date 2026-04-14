@@ -12,14 +12,18 @@ class WeatherPlugin(Plugin):
     parameters = {
         "city": {
             "type": "string",
-            "description": "City name, e.g. 'Mumbai', 'Delhi', 'New York'",
-            "required": True,
+            "description": "City name. If omitted, I'll check my memory for your location.",
+            "required": False,
         },
     }
 
     def execute(self, city: str = "", **_) -> str:
         if not city:
-            return "Which city's weather would you like?"
+            from backend import memory as mem
+            city = mem.get_user().get("location", "")
+        
+        if not city:
+            return "Sir, which city's weather would you like? (I don't have your location in my memory records yet)."
         try:
             import requests
             import urllib.parse

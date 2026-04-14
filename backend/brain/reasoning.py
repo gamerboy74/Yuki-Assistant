@@ -56,6 +56,7 @@ class Intent:
     REMINDER          = "REMINDER"
     MEMORY_STORE      = "MEMORY_STORE"
     MEMORY_RECALL     = "MEMORY_RECALL"
+    CODE_HELP         = "CODE_HELP"       # Analyze screen errors + Fix file
     COMPLEX_TASK      = "COMPLEX_TASK"    # multi-step: write email and send it
     CONVERSATIONAL    = "CONVERSATIONAL"
     UNKNOWN           = "UNKNOWN"
@@ -119,6 +120,7 @@ _INTENT_RULES: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(remind|reminder|alarm|notify me|yaad dilao)", re.I),     Intent.REMINDER),
     (re.compile(r"(remember|save this|note|store|yaad rakh)", re.I),        Intent.MEMORY_STORE),
     (re.compile(r"(what do you know|recall|memory|yaad hai|you remember)", re.I), Intent.MEMORY_RECALL),
+    (re.compile(r"(fix.*(error|code|bug)|what.*is.*wrong|why.*is.*this.*not.*working|analyze.*code)", re.I), Intent.CODE_HELP),
 ]
 
 
@@ -207,6 +209,7 @@ def build_plan(transcript: str, intent: str, user_location: str = "Bhubaneswar")
         Intent.REMINDER:         "[EXECUTE: set_reminder(text, delay)]",
         Intent.MEMORY_STORE:     "[BRAIN_SAVE: mem.save_fact(fact)]",
         Intent.MEMORY_RECALL:    "[RECON: mem.context_block()]",
+        Intent.CODE_HELP:        "[MISSION: 1. analyze_screen(error) 2. read_file(target) 3. synthesize_fix() 4. write_file(fix)]",
         Intent.COMPLEX_TASK:     "[NEXUS_LOOP: 1. Scan Environment 2. Sequentially build tool-chain 3. Verify final state]",
     }
 
@@ -215,13 +218,34 @@ def build_plan(transcript: str, intent: str, user_location: str = "Bhubaneswar")
 
 # ── Semantic Memory Retriever ────────────────────────────────────────────────
 
-def get_relevant_memories(transcript: str, memories: list[dict], n: int = 3) -> list[str]:
+async def get_relevant_memories_async(transcript: str, memories: list[dict], n: int = 3) -> list[str]:
     """
     Return the top N memories most relevant to this transcript.
-    Uses keyword overlap — zero LLM cost.
+    Uses semantic embeddings with keyword fallback.
     """
     if not memories:
         return []
+
+    # Semantic RAG
+    try:
+        from backend.memory import get_embedding_async, cosine_similarity
+        q_emb = await get_embedding_async(transcript)
+
+        if q_emb is not None and len(q_emb) > 0:
+            scored = []
+            for m in memories:
+                t_emb = await get_embedding_async(m["text"])
+                if t_emb is not None and len(t_emb) > 0:
+                    score = cosine_similarity(q_emb, t_emb)
+                    scored.append((score, m["text"]))
+
+            if scored:
+                scored.sort(key=lambda x: x[0], reverse=True)
+                res = [text for score, text in scored if score > 0.45]
+                if res:
+                    return res[:n]
+    except Exception as e:
+        logger.debug(f"[REASONING] RAG failed, falling back to keyword: {e}")
 
     # Tokenize transcript, strip common stop words
     stop = {"a", "an", "the", "is", "in", "on", "at", "to", "for", "of",
@@ -311,14 +335,14 @@ class ReasoningResult:
     enriched_transcript: str   # what actually gets sent to the LLM
 
 
-def reason(transcript: str, all_memories: list[dict], user_location: str = "") -> ReasoningResult:
+async def reason_async(transcript: str, all_memories: list[dict], user_location: str = "") -> ReasoningResult:
     """
-    Full reasoning pipeline. Returns an enriched transcript with plan hints
+    Full async reasoning pipeline. Returns an enriched transcript with plan hints
     and relevant context injected. This is what the LLM receives.
     """
     intent = classify_intent(transcript)
     plan   = build_plan(transcript, intent, user_location)
-    mems   = get_relevant_memories(transcript, all_memories)
+    mems   = await get_relevant_memories_async(transcript, all_memories)
     
     is_high_impact = intent in HIGH_IMPACT_INTENTS
 

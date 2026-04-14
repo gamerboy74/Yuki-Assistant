@@ -16,6 +16,10 @@
     font-variation-settings: 'FILL' 0, 'wght' 200, 'GRAD' 0, 'opsz' 24;
     user-select: none;
   }
+  /* Focus rings for accessibility */
+  :focus-visible {
+    @apply outline-none ring-2 ring-primary/60 ring-offset-2 ring-offset-background;
+  }
 }
 
 @layer utilities {

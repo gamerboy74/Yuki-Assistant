@@ -73,6 +73,27 @@ DEFAULT_CONFIG = {
     },
     "audio": {
         "duck_volume": 0.15
+    },
+    "chrome": {
+        "preferred": "brave",
+        "fallback": "chrome",
+        "auto_launch": True,
+        "cdp_port": 9222
+    },
+    "rss": {
+        "favorite_feeds": [
+            {"name": "TechCrunch", "url": "https://techcrunch.com/feed/"},
+            {"name": "Hacker News", "url": "https://news.ycombinator.com/rss"},
+            {"name": "The Verge", "url": "https://www.theverge.com/rss/index.xml"},
+            {"name": "Wired", "url": "https://www.wired.com/feed/rss"},
+            {"name": "BBC News", "url": "http://feeds.bbci.co.uk/news/rss.xml"},
+            {"name": "NASA", "url": "https://www.nasa.gov/rss/dyn/breaking_news.rss"},
+            {"name": "Anime News Network", "url": "https://www.animenewsnetwork.com/news/rss.xml"},
+            {"name": "Crunchyroll", "url": "https://www.crunchyroll.com/news/rss"},
+            {"name": "IGN", "url": "https://feeds.feedburner.com/ign/all"},
+            {"name": "Kotaku", "url": "https://kotaku.com/rss"},
+            {"name": "Reddit Anime", "url": "https://www.reddit.com/r/anime/.rss"}
+        ]
     }
 }
 

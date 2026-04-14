@@ -30,9 +30,52 @@ import threading
 import datetime
 import difflib
 from pathlib import Path
+import numpy as np
+import asyncio
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Cache for semantic embeddings
+_embed_cache = {}
+
+async def get_embedding_async(text: str) -> list[float]:
+    """Fetch text embedding from Gemini with local caching."""
+    if text in _embed_cache:
+        return _embed_cache[text]
+        
+    try:
+        from google import genai
+        from backend.config import cfg
+        import os
+        
+        gemini_cfg = cfg.get("gemini", {})
+        s_cfg = gemini_cfg.get("google_ai_studio", {})
+        api_key = (s_cfg.get("api_key") or os.environ.get("GOOGLE_API_KEY", "")).strip()
+        
+        if api_key and not api_key.startswith("AQ."):
+            client = genai.Client(api_key=api_key)
+        else:
+            client = genai.Client()
+            
+        res = await asyncio.to_thread(
+            client.models.embed_content,
+            model="text-embedding-004",
+            contents=text
+        )
+        
+        emb = res.embeddings[0].values
+        _embed_cache[text] = emb
+        return emb
+    except Exception as e:
+        logger.debug(f"[MEMORY] Embedding failed: {e}")
+        return []
+
+def cosine_similarity(v1, v2) -> float:
+    """Compute rapid cosine similarity using Numpy."""
+    a = np.array(v1)
+    b = np.array(v2)
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-9))
 
 # ── Storage location ──────────────────────────────────────────────────────────
 _DATA_DIR  = Path(__file__).resolve().parent / "data"

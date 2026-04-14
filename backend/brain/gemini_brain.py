@@ -22,7 +22,7 @@ from google.genai import types
 from backend.utils.logger import get_logger
 from backend.config import cfg
 from backend import memory as mem
-from backend.brain.reasoning import reason, track_execution
+from backend.brain.reasoning import reason_async, track_execution
 from backend.brain.shared import (
     build_system_content,
     build_dynamic_context,
@@ -433,7 +433,7 @@ async def process_stream(transcript: str) -> AsyncGenerator[dict, None]:
     # ── Reasoning pre-pass ────────────────────────────────────────────────────
     user_data    = mem.get_user()
     all_memories = [m for m in mem.get_all_memories()]
-    result = reason(
+    result = await reason_async(
         transcript,
         all_memories,
         user_location=user_data.get("location", ""),

@@ -1,6 +1,5 @@
 """YouTube plugin — search and play videos."""
 
-import webbrowser
 from backend.plugins._base import Plugin
 
 
@@ -16,8 +15,11 @@ class YouTubePlugin(Plugin):
     }
 
     def execute(self, query: str = "", **_) -> str:
+        from backend.plugins.browser import BrowserPlugin
+        browser = BrowserPlugin()
+        
         if not query:
-            webbrowser.open("https://www.youtube.com")
+            browser.execute(operation="navigate", url="https://www.youtube.com")
             return "Opened YouTube."
             
         import urllib.request
@@ -34,18 +36,14 @@ class YouTubePlugin(Plugin):
             # Find the first video ID
             video_ids = re.findall(r'"videoId":"([a-zA-Z0-9_-]{11})"', html)
             if video_ids:
-                # Remove duplicates while preserving order
                 unique_ids = list(dict.fromkeys(video_ids))
-                # Append &list=RD{video_id} to trigger a YouTube Mix (Radio)
-                # This ensures "Next" and "Prev" media buttons work in the browser.
                 video_url = f"https://www.youtube.com/watch?v={unique_ids[0]}&list=RD{unique_ids[0]}"
-                webbrowser.open(video_url)
+                browser.execute(operation="navigate", url=video_url)
                 return f"Playing '{query}' on YouTube."
             else:
-                # Fallback to search results
-                webbrowser.open(url)
+                browser.execute(operation="navigate", url=url)
                 return f"Could not auto-play. Showing search results for '{query}'."
         except Exception as e:
-            # Fallback on network/parse error
-            webbrowser.open(f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}")
+            fallback = f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
+            browser.execute(operation="navigate", url=fallback)
             return f"Playing '{query}' on YouTube."

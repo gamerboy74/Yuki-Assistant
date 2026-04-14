@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 interface DashboardProps {
   stats: any;
@@ -52,6 +52,29 @@ export default function Dashboard({ stats, logs, usage }: DashboardProps) {
     return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   };
 
+  // Fix 7: Real-time KB/s calculation
+  const [rates, setRates] = useState({ up: 0, down: 0 });
+  const prevNet = useRef(stats?.network);
+  const prevTs = useRef(Date.now());
+
+  useEffect(() => {
+    if (!stats?.network) return;
+    if (prevNet.current) {
+      const now = Date.now();
+      const dt = (now - prevTs.current) / 1000;
+      if (dt >= 0.8) { // update every ~1s
+        const dUp = (stats.network.sent - prevNet.current.sent) / 1024 / dt;
+        const dDown = (stats.network.recv - prevNet.current.recv) / 1024 / dt;
+        setRates({ up: dUp, down: dDown });
+        prevNet.current = stats.network;
+        prevTs.current = now;
+      }
+    } else {
+      prevNet.current = stats.network;
+      prevTs.current = Date.now();
+    }
+  }, [stats?.network]);
+
   return (
     <div className="h-full w-full p-8 overflow-y-auto subtle-scrollbar animate-fade-in relative z-10 bg-transparent">
       
@@ -73,10 +96,11 @@ export default function Dashboard({ stats, logs, usage }: DashboardProps) {
       </header>
 
       {/* Main Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        
-        {/* System Health Widget */}
-        <div className="glass-card p-6 flex flex-col gap-4">
+      <div className="@container">
+        <div className="grid grid-cols-1 @[800px]:grid-cols-2 @[1200px]:grid-cols-3 gap-6">
+          
+          {/* System Health Widget */}
+          <div className="glass-card p-6 flex flex-col gap-4">
           <div className="flex items-center gap-2 mb-2">
             <span className="material-symbols-outlined text-primary text-xl">database</span>
             <h3 className="font-medium text-on-surface">System Health</h3>
@@ -184,9 +208,14 @@ export default function Dashboard({ stats, logs, usage }: DashboardProps) {
 
           <div className="flex items-center justify-between py-2 border-b border-outline-variant/10">
              <span className="text-xs text-on-surface-variant">Session Data Transfer</span>
-             <div className="flex gap-3 text-[10px] font-mono">
-                <span className="text-primary" title="Total data sent this session">↑ {(stats?.network?.sent / 1024 / 1024 || 0).toFixed(1)} MB</span>
-                <span className="text-secondary" title="Total data received this session">↓ {(stats?.network?.recv / 1024 / 1024 || 0).toFixed(1)} MB</span>
+             <div className="flex flex-col items-end gap-1 font-mono">
+                <div className="flex gap-3 text-[10px]">
+                   <span className="text-primary" title="Total sent">↑ {(stats?.network?.sent / 1024 / 1024 || 0).toFixed(1)} MB</span>
+                   <span className="text-secondary" title="Total received">↓ {(stats?.network?.recv / 1024 / 1024 || 0).toFixed(1)} MB</span>
+                </div>
+                <div className="text-[8px] opacity-40 uppercase tracking-tighter">
+                   Rate: {rates.up.toFixed(1)} ↑ / {rates.down.toFixed(1)} ↓ KB/s
+                </div>
              </div>
           </div>
 
@@ -272,10 +301,10 @@ export default function Dashboard({ stats, logs, usage }: DashboardProps) {
              </p>
           </div>
         </div>
-
       </div>
+    </div>
 
-      {/* Visual background element - kept for additional depth */}
+    {/* Visual background element - kept for additional depth */}
       <div className="fixed bottom-0 right-0 w-[500px] h-[500px] bg-primary/5 rounded-full blur-[120px] pointer-events-none -z-10 translate-x-1/2 translate-y-1/2" />
     </div>
   );

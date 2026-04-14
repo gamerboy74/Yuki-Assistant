@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useCallback, memo, useMemo } from 'react';
+﻿import { useRef, useEffect, useState, useCallback, memo, useMemo } from 'react';
 import type { OrbState, ChatMessage } from '../App';
 import energySphere from '../assets/energy-sphere.png';
 import './AgentView.css';
@@ -34,7 +34,8 @@ const ICON_MAP: Record<OrbState, string> = {
   speaking: 'volume_up',
 };
 
-/* ── Neural Link Selector Component �const ProviderSelector = memo(({
+/* ── Neural Link Selector Component ── */
+const ProviderSelector = memo(({
   selectedProvider,
   onProviderChange
 }: {
@@ -120,8 +121,7 @@ const ICON_MAP: Record<OrbState, string> = {
       </div>
     </div>
   );
-});  );
-});
+});  
 
 /* ── Message Thread ── */
 const MessageThread = memo((
