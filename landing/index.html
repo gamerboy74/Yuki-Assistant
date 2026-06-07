@@ -1,116 +1,1468 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Yuki AI | The Future of Desktop Intelligence</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Outfit:wght@500;700;900&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yuki Neural HUD — F.R.I.D.A.Y.-Class Desktop AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=JetBrains+Mono:wght@300;400;600;700&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --bg: #040c10;
+  --bg2: #070f14;
+  --bg3: #0a141a;
+  --cyan: #00f2ff;
+  --cyan-dim: rgba(0,242,255,0.15);
+  --cyan-glow: rgba(0,242,255,0.06);
+  --magenta: #ff00ff;
+  --magenta-dim: rgba(255,0,255,0.12);
+  --green: #00ff41;
+  --white: #e8f4f7;
+  --muted: #4a6b75;
+  --muted2: #2a4550;
+  --border: rgba(0,242,255,0.12);
+  --border-hot: rgba(0,242,255,0.35);
+  --font-display: 'Orbitron', monospace;
+  --font-mono: 'JetBrains Mono', monospace;
+  --font-body: 'Rajdhani', sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--white);
+  font-family: var(--font-body);
+  font-size: 18px;
+  line-height: 1.6;
+  overflow-x: hidden;
+  cursor: none;
+}
+
+/* ── CUSTOM CURSOR ── */
+#cursor-dot {
+  position: fixed;
+  width: 6px; height: 6px;
+  background: var(--cyan);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 9999;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 10px var(--cyan), 0 0 20px var(--cyan);
+  transition: width .1s, height .1s;
+}
+#cursor-ring {
+  position: fixed;
+  width: 32px; height: 32px;
+  border: 1px solid rgba(0,242,255,0.5);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 9998;
+  transform: translate(-50%, -50%);
+  transition: transform 0.12s ease, width .2s, height .2s, border-color .2s;
+}
+body:has(a:hover, button:hover) #cursor-dot { width: 10px; height: 10px; }
+body:has(a:hover, button:hover) #cursor-ring { width: 48px; height: 48px; border-color: var(--cyan); }
+
+/* ── SCANLINES OVERLAY ── */
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.04) 2px,
+    rgba(0,0,0,0.04) 4px
+  );
+  pointer-events: none;
+  z-index: 999;
+}
+
+/* ── NOISE TEXTURE ── */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 998;
+  opacity: 0.4;
+}
+
+/* ── CANVAS ── */
+#neural-canvas {
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.6;
+}
+
+/* ── NAV ── */
+nav {
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 5vw;
+  height: 64px;
+  background: rgba(4,12,16,0.85);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+}
+.nav-logo {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 900;
+  color: var(--cyan);
+  letter-spacing: 4px;
+  text-shadow: 0 0 20px var(--cyan);
+  text-decoration: none;
+}
+.nav-logo span { color: var(--magenta); text-shadow: 0 0 20px var(--magenta); }
+.nav-links {
+  display: flex; align-items: center; gap: 2.5rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+.nav-links a {
+  color: var(--muted);
+  text-decoration: none;
+  transition: color .2s;
+}
+.nav-links a:hover { color: var(--cyan); }
+.nav-cta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--bg);
+  background: var(--cyan);
+  border: none;
+  padding: 8px 20px;
+  cursor: none;
+  font-weight: 700;
+  clip-path: polygon(8px 0%, 100% 0%, calc(100% - 8px) 100%, 0% 100%);
+  transition: background .2s, box-shadow .2s;
+}
+.nav-cta:hover { background: #40faff; box-shadow: 0 0 30px rgba(0,242,255,0.5); }
+
+/* ── HERO ── */
+.hero {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  padding: 100px 5vw 60px;
+  z-index: 1;
+  overflow: hidden;
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4rem;
+  align-items: center;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--green);
+  border: 1px solid rgba(0,255,65,0.3);
+  padding: 6px 14px;
+  margin-bottom: 2rem;
+}
+.hero-badge::before {
+  content: '';
+  width: 6px; height: 6px;
+  background: var(--green);
+  border-radius: 50%;
+  animation: pulse-green 1.5s ease-in-out infinite;
+}
+@keyframes pulse-green {
+  0%,100% { box-shadow: 0 0 0 0 rgba(0,255,65,0.6); }
+  50% { box-shadow: 0 0 0 6px rgba(0,255,65,0); }
+}
+
+.hero-title {
+  font-family: var(--font-display);
+  font-size: clamp(2.8rem, 5vw, 5rem);
+  font-weight: 900;
+  line-height: 1.05;
+  letter-spacing: 2px;
+  margin-bottom: 1.5rem;
+  color: var(--white);
+}
+.hero-title .glitch {
+  position: relative;
+  color: var(--cyan);
+  text-shadow: 0 0 40px rgba(0,242,255,0.5);
+  display: inline-block;
+}
+.hero-title .glitch::before,
+.hero-title .glitch::after {
+  content: attr(data-text);
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+}
+.hero-title .glitch::before {
+  color: var(--magenta);
+  animation: glitch1 4s infinite;
+  clip-path: polygon(0 0, 100% 0, 100% 45%, 0 45%);
+}
+.hero-title .glitch::after {
+  color: var(--green);
+  animation: glitch2 4s infinite;
+  clip-path: polygon(0 55%, 100% 55%, 100% 100%, 0 100%);
+}
+@keyframes glitch1 {
+  0%,94%,100% { transform: none; opacity: 0; }
+  95% { transform: translate(-3px, 1px); opacity: 0.8; }
+  97% { transform: translate(3px, -1px); opacity: 0.8; }
+  99% { transform: translate(-1px, 0); opacity: 0; }
+}
+@keyframes glitch2 {
+  0%,92%,100% { transform: none; opacity: 0; }
+  93% { transform: translate(3px, 2px); opacity: 0.7; }
+  96% { transform: translate(-2px, -2px); opacity: 0.7; }
+  98% { transform: none; opacity: 0; }
+}
+
+.hero-desc {
+  font-size: 1.2rem;
+  color: var(--muted);
+  font-weight: 400;
+  margin-bottom: 2.5rem;
+  max-width: 520px;
+  line-height: 1.8;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.5px;
+}
+
+.hero-actions {
+  display: flex; gap: 1rem; align-items: center; margin-bottom: 3rem;
+}
+.btn-primary {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--bg);
+  background: var(--cyan);
+  border: none;
+  padding: 14px 32px;
+  cursor: none;
+  font-weight: 700;
+  clip-path: polygon(12px 0%, 100% 0%, calc(100% - 12px) 100%, 0% 100%);
+  transition: all .2s;
+  text-decoration: none;
+  display: inline-block;
+}
+.btn-primary:hover {
+  background: #40faff;
+  box-shadow: 0 0 40px rgba(0,242,255,0.6);
+  transform: translateY(-2px);
+}
+.btn-ghost {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  background: transparent;
+  border: 1px solid var(--border-hot);
+  padding: 13px 28px;
+  cursor: none;
+  transition: all .2s;
+  text-decoration: none;
+  display: inline-block;
+}
+.btn-ghost:hover {
+  background: var(--cyan-dim);
+  border-color: var(--cyan);
+  box-shadow: 0 0 20px rgba(0,242,255,0.15);
+}
+
+/* ── SYSTEM STATUS BAR ── */
+.status-bar {
+  display: flex; gap: 2rem; align-items: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--muted);
+}
+.status-item {
+  display: flex; align-items: center; gap: 8px;
+}
+.status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot.online { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse-green 2s infinite; }
+.status-dot.warn { background: #ffaa00; box-shadow: 0 0 8px #ffaa00; animation: pulse-warn 2s infinite; }
+.status-dot.offline { background: #ff3344; }
+@keyframes pulse-warn {
+  0%,100% { box-shadow: 0 0 0 0 rgba(255,170,0,0.6); }
+  50% { box-shadow: 0 0 0 5px rgba(255,170,0,0); }
+}
+
+/* ── HERO VISUAL (Right Side) ── */
+.hero-visual {
+  display: flex; flex-direction: column; align-items: center; gap: 2rem;
+  position: relative;
+}
+
+/* ── ORB ── */
+.orb-wrap {
+  position: relative;
+  width: 320px; height: 320px;
+  display: flex; align-items: center; justify-content: center;
+}
+.orb-core {
+  width: 120px; height: 120px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 38%, #40faff, #00a0cc 45%, #002a40);
+  box-shadow:
+    0 0 40px rgba(0,242,255,0.5),
+    0 0 80px rgba(0,242,255,0.2),
+    0 0 160px rgba(0,242,255,0.08),
+    inset 0 0 30px rgba(0,242,255,0.2);
+  animation: orb-breathe 4s ease-in-out infinite;
+  position: relative;
+  z-index: 3;
+}
+@keyframes orb-breathe {
+  0%,100% { transform: scale(1); box-shadow: 0 0 40px rgba(0,242,255,0.5), 0 0 80px rgba(0,242,255,0.2); }
+  50% { transform: scale(1.05); box-shadow: 0 0 60px rgba(0,242,255,0.7), 0 0 120px rgba(0,242,255,0.3); }
+}
+.orb-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+}
+.orb-ring-1 {
+  width: 170px; height: 170px;
+  border-color: rgba(0,242,255,0.4);
+  animation: spin 12s linear infinite;
+}
+.orb-ring-1::before {
+  content: '';
+  position: absolute; top: -4px; left: 50%;
+  width: 8px; height: 8px;
+  background: var(--cyan);
+  border-radius: 50%;
+  box-shadow: 0 0 12px var(--cyan);
+}
+.orb-ring-2 {
+  width: 230px; height: 230px;
+  border-color: rgba(255,0,255,0.25);
+  animation: spin 20s linear infinite reverse;
+  border-style: dashed;
+}
+.orb-ring-2::before {
+  content: '';
+  position: absolute; bottom: -4px; left: 50%;
+  width: 7px; height: 7px;
+  background: var(--magenta);
+  border-radius: 50%;
+  box-shadow: 0 0 12px var(--magenta);
+}
+.orb-ring-3 {
+  width: 300px; height: 300px;
+  border-color: rgba(0,242,255,0.1);
+  animation: spin 35s linear infinite;
+}
+@keyframes spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+
+/* Waveform bars */
+.waveform {
+  display: flex; align-items: center; gap: 5px;
+  height: 50px;
+}
+.wave-bar {
+  width: 4px;
+  background: var(--cyan);
+  border-radius: 2px;
+  box-shadow: 0 0 6px var(--cyan);
+  animation: wave var(--d) ease-in-out infinite alternate;
+}
+@keyframes wave { from { height: 8px; } to { height: var(--h); } }
+
+/* ── TERMINAL WINDOW ── */
+.terminal {
+  background: rgba(7,15,20,0.95);
+  border: 1px solid var(--border-hot);
+  width: 100%;
+  max-width: 500px;
+  box-shadow: 0 0 40px rgba(0,242,255,0.1), 0 20px 60px rgba(0,0,0,0.5);
+}
+.terminal-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px;
+  background: rgba(0,242,255,0.05);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 1px;
+}
+.terminal-dot { width: 10px; height: 10px; border-radius: 50%; }
+.terminal-dot:nth-child(1) { background: #ff5f57; }
+.terminal-dot:nth-child(2) { background: #febc2e; }
+.terminal-dot:nth-child(3) { background: #28c840; }
+.terminal-title { flex: 1; text-align: center; }
+.terminal-body {
+  padding: 16px 20px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  min-height: 180px;
+}
+.t-line { margin-bottom: 6px; display: flex; gap: 10px; }
+.t-prompt { color: var(--cyan); flex-shrink: 0; }
+.t-cmd { color: var(--white); }
+.t-out { color: var(--green); padding-left: 22px; font-size: 12px; opacity: 0.8; }
+.t-cursor {
+  display: inline-block;
+  width: 8px; height: 14px;
+  background: var(--cyan);
+  animation: blink 1s step-end infinite;
+  vertical-align: text-bottom;
+}
+@keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* ── SECTION BASE ── */
+section {
+  position: relative;
+  z-index: 1;
+  padding: 100px 5vw;
+}
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin-bottom: 1rem;
+  opacity: 0.7;
+}
+.section-title {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 3.5vw, 3.2rem);
+  font-weight: 900;
+  letter-spacing: 2px;
+  margin-bottom: 1rem;
+  line-height: 1.1;
+}
+.section-sub {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--muted);
+  max-width: 500px;
+  margin-bottom: 4rem;
+  line-height: 1.8;
+}
+.container { max-width: 1400px; margin: 0 auto; }
+
+/* ── FEATURES GRID ── */
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+}
+.feature-card {
+  background: var(--bg2);
+  padding: 2.5rem 2rem;
+  position: relative;
+  overflow: hidden;
+  transition: background .3s;
+}
+.feature-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--cyan);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform .4s ease;
+}
+.feature-card:nth-child(even)::before { background: var(--magenta); }
+.feature-card:hover { background: var(--bg3); }
+.feature-card:hover::before { transform: scaleX(1); }
+.feature-card:hover .feat-icon { color: var(--cyan); text-shadow: 0 0 20px rgba(0,242,255,0.5); }
+.feature-card:nth-child(even):hover .feat-icon { color: var(--magenta); text-shadow: 0 0 20px rgba(255,0,255,0.5); }
+
+.feat-num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted2);
+  letter-spacing: 3px;
+  margin-bottom: 1.5rem;
+}
+.feat-icon {
+  font-size: 2rem;
+  margin-bottom: 1rem;
+  transition: all .3s;
+  display: block;
+}
+.feature-card h3 {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--white);
+  margin-bottom: 0.75rem;
+}
+.feature-card p {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.8;
+}
+.feat-tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--cyan);
+  border: 1px solid rgba(0,242,255,0.2);
+  padding: 3px 8px;
+  margin-top: 1rem;
+}
+.feature-card:nth-child(even) .feat-tag { color: var(--magenta); border-color: rgba(255,0,255,0.2); }
+
+/* ── BRAIN CASCADE ── */
+.cascade-section {
+  background: linear-gradient(180deg, var(--bg) 0%, var(--bg2) 50%, var(--bg) 100%);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.cascade-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5rem;
+  align-items: center;
+}
+.cascade-visual {
+  position: relative;
+}
+.brain-node {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  margin-bottom: 1rem;
+  position: relative;
+  transition: all .3s;
+  cursor: default;
+}
+.brain-node:hover {
+  border-color: var(--border-hot);
+  background: var(--bg3);
+  transform: translateX(8px);
+}
+.brain-node.active {
+  border-color: var(--cyan);
+  box-shadow: 0 0 20px rgba(0,242,255,0.1), inset 0 0 20px rgba(0,242,255,0.03);
+}
+.brain-node.active::before {
+  content: 'PRIMARY';
+  position: absolute;
+  top: -1px; right: -1px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 2px;
+  background: var(--cyan);
+  color: var(--bg);
+  padding: 3px 8px;
+  font-weight: 700;
+}
+.brain-icon {
+  width: 48px; height: 48px;
+  border-radius: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.4rem;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+}
+.brain-node.active .brain-icon { border-color: var(--cyan); background: rgba(0,242,255,0.08); }
+.brain-node .brain-info h4 {
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  letter-spacing: 2px;
+  color: var(--white);
+  margin-bottom: 4px;
+}
+.brain-node .brain-info p {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.cascade-arrow {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--muted2);
+  padding: 0 0 0 2.5rem;
+  margin-bottom: 1rem;
+}
+.cascade-arrow::before {
+  content: '';
+  width: 1px;
+  height: 24px;
+  background: linear-gradient(var(--muted2), transparent);
+  margin-left: 23px;
+}
+.cascade-text h3 {
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  letter-spacing: 2px;
+  margin-bottom: 1.5rem;
+}
+.cascade-text p {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.9;
+  margin-bottom: 1.5rem;
+}
+.stat-row {
+  display: flex; gap: 2rem; margin-top: 2rem;
+}
+.stat-item {
+  border-left: 2px solid var(--cyan);
+  padding-left: 1rem;
+}
+.stat-item:nth-child(2) { border-color: var(--magenta); }
+.stat-num {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 900;
+  color: var(--cyan);
+}
+.stat-item:nth-child(2) .stat-num { color: var(--magenta); }
+.stat-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 2px;
+}
+
+/* ── COMMANDS TABLE ── */
+.commands-section {
+  background: var(--bg2);
+  border-top: 1px solid var(--border);
+}
+.commands-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  margin-top: 3rem;
+}
+.cmd-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  background: var(--bg2);
+  padding: 1.2rem 1.5rem;
+  transition: background .2s;
+  align-items: center;
+}
+.cmd-row:hover { background: var(--bg3); }
+.cmd-text {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--cyan);
+}
+.cmd-text::before { content: '>_ '; opacity: 0.4; }
+.cmd-result {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+}
+
+/* ── INSTALL SECTION ── */
+.install-section {
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
+.install-layout {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 5rem;
+  align-items: start;
+}
+.install-steps {
+  display: flex; flex-direction: column; gap: 1.5rem;
+}
+.install-step {
+  display: flex; gap: 1.5rem; align-items: flex-start;
+}
+.step-num {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 900;
+  color: var(--cyan);
+  width: 36px; height: 36px;
+  border: 1px solid var(--border-hot);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  letter-spacing: 1px;
+}
+.step-body h4 {
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  letter-spacing: 2px;
+  color: var(--white);
+  margin-bottom: 0.3rem;
+}
+.step-body p {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+.code-block {
+  background: rgba(4,12,16,0.95);
+  border: 1px solid var(--border-hot);
+  box-shadow: 0 0 40px rgba(0,242,255,0.08);
+}
+.code-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0,242,255,0.04);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 1px;
+}
+.code-lang { color: var(--cyan); }
+.code-body {
+  padding: 20px 24px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 2;
+}
+.code-body .c-cmd { color: var(--white); }
+.code-body .c-comment { color: var(--muted); font-style: italic; }
+.code-body .c-flag { color: var(--cyan); }
+.code-body .c-str { color: var(--green); }
+.code-body .c-prompt { color: var(--magenta); margin-right: 10px; }
+
+/* ── SOCIAL PROOF / SPECS ── */
+.specs-section {
+  padding: 80px 5vw;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, var(--bg) 0%, var(--bg3) 100%);
+}
+.specs-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+}
+.spec-cell {
+  background: var(--bg);
+  padding: 2rem 1.5rem;
+  text-align: center;
+  transition: background .2s;
+}
+.spec-cell:hover { background: var(--bg3); }
+.spec-val {
+  font-family: var(--font-display);
+  font-size: 2.2rem;
+  font-weight: 900;
+  color: var(--cyan);
+  display: block;
+  text-shadow: 0 0 20px rgba(0,242,255,0.3);
+}
+.spec-cell:nth-child(2n) .spec-val { color: var(--magenta); text-shadow: 0 0 20px rgba(255,0,255,0.3); }
+.spec-key {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  display: block;
+  margin-top: 0.4rem;
+}
+
+/* ── FOOTER ── */
+footer {
+  position: relative;
+  z-index: 1;
+  padding: 3rem 5vw;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.foot-logo {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 900;
+  color: var(--cyan);
+  letter-spacing: 4px;
+  text-shadow: 0 0 20px rgba(0,242,255,0.3);
+}
+.foot-logo span { color: var(--magenta); }
+.foot-right {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted2);
+  letter-spacing: 1px;
+}
+.foot-links {
+  display: flex; gap: 2rem;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 2px;
+}
+.foot-links a {
+  color: var(--muted);
+  text-decoration: none;
+  text-transform: uppercase;
+  transition: color .2s;
+}
+.foot-links a:hover { color: var(--cyan); }
+
+/* ── REVEAL ANIMATIONS ── */
+.reveal {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.7s ease, transform 0.7s ease;
+}
+.reveal.visible {
+  opacity: 1;
+  transform: none;
+}
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+.reveal-delay-3 { transition-delay: 0.3s; }
+.reveal-delay-4 { transition-delay: 0.4s; }
+
+/* ── DIVIDER LINE ── */
+.glow-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  opacity: 0.4;
+  margin: 0 5vw;
+}
+
+/* ── HORIZONTAL SCROLL TICKER ── */
+.ticker-wrap {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: rgba(0,242,255,0.02);
+  padding: 14px 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.ticker-inner {
+  display: inline-flex; gap: 0;
+  animation: ticker 30s linear infinite;
+}
+.ticker-item {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 3rem;
+}
+.ticker-item span { color: var(--cyan); }
+@keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+
+/* ── MEDIA QUERIES ── */
+@media (max-width: 900px) {
+  .hero-grid, .cascade-layout, .install-layout { grid-template-columns: 1fr; }
+  .hero-visual { order: -1; }
+  .features-grid { grid-template-columns: 1fr; }
+  .commands-grid { grid-template-columns: 1fr; }
+  .specs-grid { grid-template-columns: repeat(2, 1fr); }
+  .nav-links a:not(.nav-cta) { display: none; }
+  .orb-wrap { width: 240px; height: 240px; }
+  .orb-ring-3 { width: 220px; height: 220px; }
+  footer { flex-direction: column; gap: 1rem; text-align: center; }
+}
+</style>
 </head>
 <body>
-    <div class="background-overlay"></div>
-    <div class="cosmic-field">
-        <!-- Generated stars go here -->
+
+<!-- Custom Cursor -->
+<div id="cursor-dot"></div>
+<div id="cursor-ring"></div>
+
+<!-- Neural Canvas -->
+<canvas id="neural-canvas"></canvas>
+
+<!-- NAV -->
+<nav>
+  <a href="#" class="nav-logo">YUKI<span>.SYS</span></a>
+  <div class="nav-links">
+    <a href="#features">Capabilities</a>
+    <a href="#cascade">Neural Links</a>
+    <a href="#install">Setup</a>
+    <button class="nav-cta" onclick="document.getElementById('install').scrollIntoView({behavior:'smooth'})">Download v3</button>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero" id="home">
+  <div class="hero-grid container">
+    <!-- Left -->
+    <div class="hero-content">
+      <div class="hero-badge">Neural Link Active</div>
+      <h1 class="hero-title">
+        Your Desktop Has<br>
+        Evolved Into<br>
+        <span class="glitch" data-text="SENTIENCE">SENTIENCE</span>
+      </h1>
+      <p class="hero-desc">
+        Yuki is a F.R.I.D.A.Y.-class neural HUD. Multi-brain cascade across Gemini, GPT-4o and local Ollama. Sub-500ms failover. Zero interruption.
+      </p>
+      <div class="hero-actions">
+        <a href="#install" class="btn-primary">Initiate Neural Link</a>
+        <a href="#cascade" class="btn-ghost">View Architecture</a>
+      </div>
+      <div class="status-bar">
+        <div class="status-item">
+          <div class="status-dot online"></div>
+          <span>OLLAMA · LOCAL</span>
+        </div>
+        <div class="status-item">
+          <div class="status-dot online"></div>
+          <span>GEMINI · CLOUD</span>
+        </div>
+        <div class="status-item">
+          <div class="status-dot warn"></div>
+          <span>OPENAI · STANDBY</span>
+        </div>
+      </div>
     </div>
-
-    <nav class="navbar">
-        <div class="logo">YUKI<span>.SYS</span></div>
-        <div class="nav-links">
-            <a href="#features">Capabilities</a>
-            <a href="#brains">Neural Links</a>
-            <a href="#setup">Setup</a>
-            <button class="nav-cta">Download v3.0</button>
+    <!-- Right -->
+    <div class="hero-visual">
+      <!-- Orb -->
+      <div class="orb-wrap">
+        <div class="orb-ring orb-ring-3"></div>
+        <div class="orb-ring orb-ring-2"></div>
+        <div class="orb-ring orb-ring-1"></div>
+        <div class="orb-core"></div>
+      </div>
+      <!-- Waveform -->
+      <div class="waveform" id="waveform"></div>
+      <!-- Terminal -->
+      <div class="terminal" id="hero-terminal">
+        <div class="terminal-bar">
+          <div class="terminal-dot"></div>
+          <div class="terminal-dot"></div>
+          <div class="terminal-dot"></div>
+          <span class="terminal-title">YUKI · NEURAL TERMINAL v3.0</span>
         </div>
-    </nav>
-
-    <header class="hero">
-        <div class="hero-content">
-            <div class="badge animate-reveal">NEXT-GEN AI ASSISTANT</div>
-            <h1 class="animate-reveal" style="animation-delay: 0.1s;">Elevate Your Desktop to<br><span class="glow-text">Sentient Levels</span></h1>
-            <p class="animate-reveal" style="animation-delay: 0.2s;">Meet Yuki. A high-performance, F.R.I.D.A.Y.-class desktop oracle built with multi-brain architecture and zero-latency voice synthesis.</p>
-            <div class="hero-actions animate-reveal" style="animation-delay: 0.3s;">
-                <button class="btn-primary">Initiate Link</button>
-                <button class="btn-secondary">View Showcase</button>
-            </div>
+        <div class="terminal-body" id="term-body">
+          <div class="t-line"><span class="t-prompt">›_</span><span class="t-cmd" id="term-cmd"></span><span class="t-cursor" id="term-cursor"></span></div>
+          <div id="term-output"></div>
         </div>
-        <div class="hero-visual animate-reveal" style="animation-delay: 0.4s;">
-            <div class="orb-container">
-                <div class="follower" data-speed="1.2">
-                    <div class="orb-core"></div>
-                </div>
-                <div class="follower" data-speed="0.6">
-                    <div class="orb-ring ring-1"></div>
-                </div>
-                <div class="follower" data-speed="0.3">
-                    <div class="orb-ring ring-2"></div>
-                </div>
-                <div class="follower" data-speed="-0.2">
-                    <div class="orb-ring ring-3"></div>
-                </div>
-            </div>
-        </div>
-    </header>
+      </div>
+    </div>
+  </div>
+</section>
 
-    <section id="features" class="section">
-        <div class="section-header">
-            <h2>Core Capabilities</h2>
-            <p>Built for speed. Optimized for absolute control.</p>
-        </div>
-        <div class="features-grid">
-            <div class="glass-card">
-                <div class="card-icon">🎙️</div>
-                <h3>Voice Mastery</h3>
-                <p>Sub-0.5s latency with Kokoro TTS and Sentinel VAD. Conversing with AI has never felt more human.</p>
-            </div>
-            <div class="glass-card">
-                <div class="card-icon">🧠</div>
-                <h3>Multi-Brain Sync</h3>
-                <p>Switch between Gemini 2.0, GPT-4o, and local Ollama. Intelligence that adapts to your needs.</p>
-            </div>
-            <div class="glass-card">
-                <div class="card-icon">⚡</div>
-                <h3>System Control</h3>
-                <p>Control WhatsApp, Spotify, and Windows internals directly through conversational intents.</p>
-            </div>
-        </div>
-    </section>
+<!-- TICKER -->
+<div class="ticker-wrap">
+  <div class="ticker-inner" id="ticker"></div>
+</div>
 
-    <section id="brains" class="section dark-alt">
-        <div class="brains-panel glass-card">
-            <div class="panel-info">
-                <h2>Neural Interface Status</h2>
-                <p>Real-time connectivity to cloud and local intelligence.</p>
-                <div class="status-list">
-                    <div class="status-item">
-                        <span class="status-indicator online"></span>
-                        <span class="status-label">OLLAMA (LOCAL)</span>
-                        <span class="status-value">ONLINE</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-indicator warning"></span>
-                        <span class="status-label">GEMINI</span>
-                        <span class="status-value">QUOTA HIT</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-indicator danger"></span>
-                        <span class="status-label">OPENAI</span>
-                        <span class="status-value">SCOPE LIMIT</span>
-                    </div>
-                </div>
-            </div>
-            <div class="panel-graphic">
-                <div class="brain-shield"></div>
-            </div>
+<!-- SPECS BAR -->
+<div class="specs-section">
+  <div class="container">
+    <div class="specs-grid">
+      <div class="spec-cell reveal">
+        <span class="spec-val">&lt;500ms</span>
+        <span class="spec-key">Brain Failover</span>
+      </div>
+      <div class="spec-cell reveal reveal-delay-1">
+        <span class="spec-val">3</span>
+        <span class="spec-key">AI Brains</span>
+      </div>
+      <div class="spec-cell reveal reveal-delay-2">
+        <span class="spec-val">82M</span>
+        <span class="spec-key">TTS Parameters</span>
+      </div>
+      <div class="spec-cell reveal reveal-delay-3">
+        <span class="spec-val">100%</span>
+        <span class="spec-key">Uptime Target</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="container">
+    <div class="section-label reveal">// CORE CAPABILITIES</div>
+    <h2 class="section-title reveal reveal-delay-1">Built for<br>Absolute Control</h2>
+    <p class="section-sub reveal reveal-delay-2">Six pillars of a neural-class assistant. No limits. No apologies.</p>
+    <div class="features-grid">
+      <div class="feature-card reveal">
+        <div class="feat-num">// 01</div>
+        <span class="feat-icon">🎙️</span>
+        <h3>Voice Mastery</h3>
+        <p>Sentinel VAD with sub-0.5s wake detection. Kokoro-82M TTS renders speech locally — no cloud, no latency, no excuses. Hinglish optimized.</p>
+        <div class="feat-tag">KOKORO-82M · LOCAL</div>
+      </div>
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="feat-num">// 02</div>
+        <span class="feat-icon">🧠</span>
+        <h3>Multi-Brain Cascade</h3>
+        <p>Primary on Gemini 2.0 Flash. Automatic failover to GPT-4o then local Ollama. Circuit-breaker logic means zero blackouts, ever.</p>
+        <div class="feat-tag">CIRCUIT-BREAKER · 500MS</div>
+      </div>
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="feat-num">// 03</div>
+        <span class="feat-icon">⚡</span>
+        <h3>System Dominion</h3>
+        <p>Control Spotify, WhatsApp, Windows volume, screenshots, and app launching through pure conversational intent. No GUIs required.</p>
+        <div class="feat-tag">WINDOWS · NATIVE</div>
+      </div>
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="feat-num">// 04</div>
+        <span class="feat-icon">🌐</span>
+        <h3>Observant Browser</h3>
+        <p>CDP-powered browser control. Yuki doesn't just open links — she reads them, scrapes DOM, parses live data, and reports directly to the HUD.</p>
+        <div class="feat-tag">CDP · LIVE SCRAPE</div>
+      </div>
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="feat-num">// 05</div>
+        <span class="feat-icon">🌊</span>
+        <h3>Reactive Waveform</h3>
+        <p>5-bar frequency visualizer shifts rhythms across Listening, Thinking, and Speaking states. Every mode has its own neural signature.</p>
+        <div class="feat-tag">REAL-TIME · 60FPS</div>
+      </div>
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="feat-num">// 06</div>
+        <span class="feat-icon">🛡️</span>
+        <h3>Proactive Agent</h3>
+        <p>Autonomous background layer monitors neural link health, API quotas, and system thermal levels. Audible alerts before things break.</p>
+        <div class="feat-tag">AUTONOMOUS · ALWAYS ON</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- BRAIN CASCADE -->
+<section id="cascade" class="cascade-section">
+  <div class="container">
+    <div class="cascade-layout">
+      <div class="cascade-visual reveal">
+        <div class="section-label" style="margin-bottom:2rem">// NEURAL CASCADE</div>
+        <div class="brain-node active">
+          <div class="brain-icon">✦</div>
+          <div class="brain-info">
+            <h4>GEMINI 2.0 FLASH</h4>
+            <p>Primary brain · Cloud · State-of-the-art reasoning</p>
+          </div>
         </div>
-    </section>
+        <div class="cascade-arrow">FALLBACK IF QUOTA HIT</div>
+        <div class="brain-node">
+          <div class="brain-icon">◈</div>
+          <div class="brain-info">
+            <h4>OPENAI GPT-4O</h4>
+            <p>Secondary brain · Cloud · High-capacity backup</p>
+          </div>
+        </div>
+        <div class="cascade-arrow">FALLBACK IF OFFLINE</div>
+        <div class="brain-node">
+          <div class="brain-icon">◉</div>
+          <div class="brain-info">
+            <h4>OLLAMA · GEMMA 3</h4>
+            <p>Local brain · Offline · Zero-dependency survival mode</p>
+          </div>
+        </div>
+      </div>
+      <div class="cascade-text reveal reveal-delay-2">
+        <h3>Neural Intelligence<br>That Never Sleeps</h3>
+        <p>Most AI assistants die when their API quota hits zero. Yuki doesn't. The multi-brain cascade is a fault-tolerant architecture — when one link drops, the next takes over in under 500 milliseconds. You won't even notice.</p>
+        <p>Every brain switch is monitored by the Proactive Agent. Cost, token consumption, latency — all tracked. All logged. All optimized.</p>
+        <div class="stat-row">
+          <div class="stat-item">
+            <div class="stat-num">&lt;500ms</div>
+            <div class="stat-label">Switchover Time</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-num">3×</div>
+            <div class="stat-label">Redundancy Layer</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
 
-    <footer class="footer">
-        <div class="footer-logo">YUKI<span>.SYS</span></div>
-        <p>&copy; 2026 Developed by Antigravity AI. All rights reserved.</p>
-    </footer>
+<!-- COMMANDS -->
+<section id="commands" class="commands-section">
+  <div class="container">
+    <div class="section-label reveal">// NEURAL COMMANDS</div>
+    <h2 class="section-title reveal reveal-delay-1">Talk. She Acts.</h2>
+    <p class="section-sub reveal reveal-delay-2">Natural language mapped to deep OS actions. No plugins. No setup. Just intent.</p>
+    <div class="commands-grid reveal">
+      <div class="cmd-row">
+        <div class="cmd-text">Open YouTube</div>
+        <div class="cmd-result">Launches via Link Map protocol</div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-text">Weather in Tokyo</div>
+        <div class="cmd-result">Real-time weather segment fetch</div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-text">Search cricbuzz for scores</div>
+        <div class="cmd-result">Observant: navigates, scrapes, reports</div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-text">Pause the song</div>
+        <div class="cmd-result">Global Media Control Protocol</div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-text">Set volume to 50</div>
+        <div class="cmd-result">Hardware sound modulation</div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-text">Send file to Mom</div>
+        <div class="cmd-result">Automated WhatsApp file dispatcher</div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-text">Take a screenshot</div>
+        <div class="cmd-result">Captures to Desktop instantly</div>
+      </div>
+      <div class="cmd-row">
+        <div class="cmd-text">Remind me at 6pm</div>
+        <div class="cmd-result">Proactive Agent reminder queued</div>
+      </div>
+    </div>
+  </div>
+</section>
 
-    <script src="script.js"></script>
+<!-- INSTALL -->
+<section id="install" class="install-section">
+  <div class="container">
+    <div class="section-label reveal">// QUICK START</div>
+    <h2 class="section-title reveal reveal-delay-1">Boot in<br>Three Commands</h2>
+    <div class="install-layout" style="margin-top:3rem">
+      <div class="install-steps reveal">
+        <div class="install-step">
+          <div class="step-num">01</div>
+          <div class="step-body">
+            <h4>Prerequisites</h4>
+            <p>Node.js 18+ · Python 3.10+ · espeak-ng · Ollama running locally</p>
+          </div>
+        </div>
+        <div class="install-step">
+          <div class="step-num">02</div>
+          <div class="step-body">
+            <h4>Clone & Install</h4>
+            <p>One command pulls all frontend and Python dependencies simultaneously</p>
+          </div>
+        </div>
+        <div class="install-step">
+          <div class="step-num">03</div>
+          <div class="step-body">
+            <h4>Link Your Brain</h4>
+            <p>Paste API keys into the settings panel. Yuki handles the rest — auto-generates config and validates each brain.</p>
+          </div>
+        </div>
+        <div class="install-step">
+          <div class="step-num">04</div>
+          <div class="step-body">
+            <h4>Optional: GPU Boost</h4>
+            <p>NVIDIA GPU enables sub-second Whisper transcription and hardware-accelerated Kokoro synthesis.</p>
+          </div>
+        </div>
+      </div>
+      <div class="code-block reveal reveal-delay-2">
+        <div class="code-header">
+          <span class="code-lang">POWERSHELL</span>
+          <span>INSTALL SEQUENCE</span>
+        </div>
+        <div class="code-body">
+          <div><span class="c-comment"># Clone the neural HUD</span></div>
+          <div><span class="c-prompt">PS›</span><span class="c-cmd">git clone </span><span class="c-str">https://github.com/gamerboy74/Yuki-Assistant</span></div>
+          <div><span class="c-prompt">PS›</span><span class="c-cmd">cd</span> Yuki-Assistant</div>
+          <div>&nbsp;</div>
+          <div><span class="c-comment"># Install all dependencies</span></div>
+          <div><span class="c-prompt">PS›</span><span class="c-cmd">npm install</span></div>
+          <div><span class="c-prompt">PS›</span><span class="c-cmd">pip install</span> <span class="c-flag">-r</span> requirements.txt</div>
+          <div>&nbsp;</div>
+          <div><span class="c-comment"># Pull local fallback brain</span></div>
+          <div><span class="c-prompt">PS›</span><span class="c-cmd">ollama pull</span> <span class="c-str">gemma3:4b</span></div>
+          <div>&nbsp;</div>
+          <div><span class="c-comment"># Launch the HUD</span></div>
+          <div><span class="c-prompt">PS›</span><span class="c-cmd">npm run</span> <span class="c-flag">electron:dev</span></div>
+          <div>&nbsp;</div>
+          <div><span class="c-comment"># Neural link initializing...</span></div>
+          <div><span class="c-str">✓ Ollama bridge connected</span></div>
+          <div><span class="c-str">✓ Voice sentinel active</span></div>
+          <div><span class="c-str">✓ HUD ready — say "Hey Yuki"</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="foot-logo">YUKI<span>.SYS</span></div>
+  <div class="foot-links">
+    <a href="https://github.com/gamerboy74/Yuki-Assistant" target="_blank">GitHub</a>
+    <a href="#features">Docs</a>
+    <a href="#cascade">Architecture</a>
+  </div>
+  <div class="foot-right">
+    &copy; 2026 · DEVELOPED BY ANTIGRAVITY AI · ALL RIGHTS RESERVED
+  </div>
+</footer>
+
+<script>
+/* ─── CURSOR ─── */
+const dot = document.getElementById('cursor-dot');
+const ring = document.getElementById('cursor-ring');
+let mx = 0, my = 0, rx = 0, ry = 0;
+document.addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; });
+function animCursor() {
+  dot.style.left = mx + 'px'; dot.style.top = my + 'px';
+  rx += (mx - rx) * 0.12; ry += (my - ry) * 0.12;
+  ring.style.left = rx + 'px'; ring.style.top = ry + 'px';
+  requestAnimationFrame(animCursor);
+}
+animCursor();
+
+/* ─── NEURAL CANVAS ─── */
+const canvas = document.getElementById('neural-canvas');
+const ctx = canvas.getContext('2d');
+let W, H, nodes = [];
+const NODE_COUNT = 80;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', () => { resize(); });
+
+class Node {
+  constructor() { this.reset(); }
+  reset() {
+    this.x = Math.random() * W;
+    this.y = Math.random() * H;
+    this.vx = (Math.random() - 0.5) * 0.4;
+    this.vy = (Math.random() - 0.5) * 0.4;
+    this.r = Math.random() * 2 + 1;
+    this.life = 0;
+    this.maxLife = 300 + Math.random() * 300;
+  }
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+    this.life++;
+    if (this.x < 0 || this.x > W || this.y < 0 || this.y > H || this.life > this.maxLife) this.reset();
+  }
+}
+
+for (let i = 0; i < NODE_COUNT; i++) nodes.push(new Node());
+
+let mouseX = W / 2, mouseY = H / 2;
+document.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
+
+function drawCanvas() {
+  ctx.clearRect(0, 0, W, H);
+  nodes.forEach(n => n.update());
+
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const dx = nodes[i].x - nodes[j].x;
+      const dy = nodes[i].y - nodes[j].y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 120) {
+        const alpha = (1 - dist / 120) * 0.25;
+        const useMag = (i + j) % 7 === 0;
+        ctx.beginPath();
+        ctx.moveTo(nodes[i].x, nodes[i].y);
+        ctx.lineTo(nodes[j].x, nodes[j].y);
+        ctx.strokeStyle = useMag
+          ? `rgba(255,0,255,${alpha})`
+          : `rgba(0,242,255,${alpha})`;
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+      }
+    }
+    // Mouse attraction lines
+    const mdx = nodes[i].x - mouseX;
+    const mdy = nodes[i].y - mouseY;
+    const mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+    if (mdist < 180) {
+      const alpha = (1 - mdist / 180) * 0.4;
+      ctx.beginPath();
+      ctx.moveTo(nodes[i].x, nodes[i].y);
+      ctx.lineTo(mouseX, mouseY);
+      ctx.strokeStyle = `rgba(0,242,255,${alpha})`;
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
+
+    // Draw node dot
+    ctx.beginPath();
+    ctx.arc(nodes[i].x, nodes[i].y, nodes[i].r, 0, Math.PI * 2);
+    ctx.fillStyle = i % 5 === 0 ? 'rgba(255,0,255,0.6)' : 'rgba(0,242,255,0.6)';
+    ctx.fill();
+  }
+  requestAnimationFrame(drawCanvas);
+}
+drawCanvas();
+
+/* ─── WAVEFORM ─── */
+const wf = document.getElementById('waveform');
+const heights = [14, 28, 42, 35, 20, 45, 30, 18, 38, 25];
+const delays = [0, 0.15, 0.3, 0.1, 0.4, 0.05, 0.25, 0.35, 0.2, 0.45];
+heights.forEach((h, i) => {
+  const bar = document.createElement('div');
+  bar.className = 'wave-bar';
+  bar.style.setProperty('--h', h + 'px');
+  bar.style.setProperty('--d', (0.6 + delays[i]) + 's');
+  bar.style.animationDelay = delays[i] + 's';
+  bar.style.height = h + 'px';
+  wf.appendChild(bar);
+});
+
+/* ─── TERMINAL ANIMATION ─── */
+const sequences = [
+  { cmd: 'Search cricbuzz for live IPL scores', delay: 800,
+    outputs: ['[NEXUS] Navigating cricbuzz.com...', '[SCRAPE] Live: CSK 187/4 vs MI 195/6', '[YUKI] Mumbai Indians won by 8 runs.'] },
+  { cmd: 'Set volume to 60', delay: 600,
+    outputs: ['[SYS] Hardware audio — 60% applied.'] },
+  { cmd: 'Open Spotify and play lo-fi', delay: 700,
+    outputs: ['[MEDIA] Spotify launched.', '[MEDIA] Playing: Lo-Fi Beats playlist.'] },
+  { cmd: 'Weather in Tokyo tomorrow', delay: 750,
+    outputs: ['[WEATHER] Tokyo · 26°C · Partly cloudy', '[WEATHER] Evening: 19°C · Clear skies.'] },
+];
+
+let seqIdx = 0;
+const cmdEl = document.getElementById('term-cmd');
+const outEl = document.getElementById('term-output');
+const cursorEl = document.getElementById('term-cursor');
+
+async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function typeCmd(text) {
+  cmdEl.textContent = '';
+  for (let i = 0; i < text.length; i++) {
+    cmdEl.textContent += text[i];
+    await sleep(35 + Math.random() * 20);
+  }
+}
+
+async function showOutput(lines) {
+  outEl.innerHTML = '';
+  for (const line of lines) {
+    await sleep(300);
+    const el = document.createElement('div');
+    el.className = 't-out';
+    el.textContent = line;
+    outEl.appendChild(el);
+  }
+}
+
+async function runTerminal() {
+  while (true) {
+    const seq = sequences[seqIdx % sequences.length];
+    cursorEl.style.display = 'inline-block';
+    await sleep(seq.delay);
+    await typeCmd(seq.cmd);
+    cursorEl.style.display = 'none';
+    await sleep(400);
+    await showOutput(seq.outputs);
+    await sleep(3000);
+    outEl.innerHTML = '';
+    cmdEl.textContent = '';
+    cursorEl.style.display = 'inline-block';
+    seqIdx++;
+  }
+}
+runTerminal();
+
+/* ─── TICKER ─── */
+const tickerItems = [
+  ['GEMINI 2.0', 'PRIMARY BRAIN'],
+  ['KOKORO-82M', 'LOCAL TTS'],
+  ['SENTINEL VAD', 'VOICE DETECTION'],
+  ['OLLAMA GEMMA3', 'OFFLINE BRAIN'],
+  ['CDP BRIDGE', 'BROWSER CONTROL'],
+  ['WHISPER', 'TRANSCRIPTION'],
+  ['GPT-4O', 'FALLBACK BRAIN'],
+  ['PROACTIVE AGENT', 'SYSTEM GUARD'],
+];
+const ticker = document.getElementById('ticker');
+const itemsDouble = [...tickerItems, ...tickerItems];
+itemsDouble.forEach(([label, sub]) => {
+  const el = document.createElement('span');
+  el.className = 'ticker-item';
+  el.innerHTML = `<span>${label}</span> · ${sub}`;
+  ticker.appendChild(el);
+});
+
+/* ─── REVEAL ON SCROLL ─── */
+const reveals = document.querySelectorAll('.reveal');
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.classList.add('visible');
+      observer.unobserve(e.target);
+    }
+  });
+}, { threshold: 0.1 });
+reveals.forEach(el => observer.observe(el));
+
+/* ─── BRAIN NODE ANIMATION ─── */
+const brainNodes = document.querySelectorAll('.brain-node');
+let activeIdx = 0;
+setInterval(() => {
+  brainNodes.forEach((n, i) => n.classList.toggle('active', i === activeIdx));
+  activeIdx = (activeIdx + 1) % brainNodes.length;
+}, 3000);
+
+/* ─── PARALLAX ORB ON MOUSE ─── */
+const orbCore = document.querySelector('.orb-core');
+document.addEventListener('mousemove', e => {
+  const dx = (e.clientX / window.innerWidth - 0.5) * 12;
+  const dy = (e.clientY / window.innerHeight - 0.5) * 12;
+  if (orbCore) orbCore.style.transform = `translate(${dx}px, ${dy}px)`;
+});
+</script>
 </body>
 </html>
