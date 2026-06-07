@@ -43,6 +43,18 @@
 *   **Neural Economy**: Real-time monitoring of tokens and session cost via an integrated dashboard widget.
 *   **Total Reliability**: Implemented circuit-breaker logic prevents "blackouts" by switching to **OpenAI GPT-4o** or **Local Ollama (Gemma 3)** in under 500ms.
 
+### 💾 Semantic Memory & Passive Learner
+*   **Dual-Layer Memory Vault**: Uses local JSON for instant configuration hydration and a **ChromaDB Vector Store** for persistent semantic fact indexing and context recall.
+*   **Habit & Pattern Sensing**: Tracks tool usage patterns by the hour (`track_pattern`) to surface proactive alerts and learned routine suggestions on startup.
+*   **Passive Learning Pipeline**: A background LLM filter parses conversation turns to extract and store user details, facts, and preferences without explicit "remember this" commands.
+
+### 🛡️ Process Isolation (ToolWorker Gateway)
+*   **Zero-Thread Lock**: Heavy, blocking operations (e.g., Playwright page loading, DOM parsing, WhatsApp dispatching) run in an isolated Python subprocess.
+*   **Self-Healing Host**: If a subprocess tool hangs or exceeds execution limits, the main thread automatically restarts the gateway without interrupting speech synthesis or voice recognition.
+
+### 🔌 Model Context Protocol (MCP) Server
+*   **IDE Integration**: Turns Yuki into an MCP server (`python -m backend.mcp_server`). Connect your Claude Desktop, Cursor, or Windsurf directly to Yuki's brain to control Spotify, fetch files, or query calendar schedules via your editor.
+
 ---
 
 ## 🚀 Quick Start
@@ -71,6 +83,32 @@
     > [!TIP]
     > Yuki automatically generates and manages your `yuki.config.json` file. You can also reference `yuki.config.json.example` for manual setup.
 
+### 🔧 Developer Setup (Advanced Features)
+
+#### 1. Setup Semantic Memory (ChromaDB)
+To enable long-term vector-based fact recall, install semantic dependencies:
+```powershell
+pip install chromadb sentence-transformers
+```
+
+#### 2. Run the MCP Server
+To expose Yuki's tool suite to external LLM clients:
+```powershell
+python -m backend.mcp_server
+```
+Add the following to your Claude Desktop config (`%APPDATA%\Client-name\claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "yuki-assistant": {
+      "command": "python",
+      "args": ["-m", "backend.mcp_server"],
+      "cwd": "C:/path/to/yuki_assistant"
+    }
+  }
+}
+```
+
 ---
 
 ## 🛠️ Neural Commands
@@ -86,6 +124,8 @@ Yuki supports deep OS automation out of the box.
 | `Send file to Mom` | Automated WhatsApp File Dispatcher |
 | `Take a screenshot` | Captures Desktop to `%USERPROFILE%\Desktop` |
 | `Weather in Tokyo` | Real-time weather segment fetching |
+| `Start my day` | **Proactive Agent**: Runs complete Morning Briefing (Weather, Calendars, System stats, News category) |
+| `Sync Cursor with Yuki` | Triggers MCP stdio connection gateway |
 
 ---
 
@@ -107,10 +147,13 @@ All settings are stored in `yuki.config.json`.
 
 ```mermaid
 graph TD
-    UI[Electron/React HUD] -->|Transcript| ORC[Python Orchestrator]
-    ORC -->|VAD| MIC[Sentinel Voice Activity]
+    UI[Electron/React HUD] <-->|IPC Bridge| ORC[YukiOrchestrator]
+    ORC <-->|Events| AW[AudioWorker]
+    AW -->|Sensors| VAD[VAD Sentinel]
+    AW -->|Sensors| STT[Whisper STT]
+    AW -->|Speech| TTS[Kokoro/ElevenLabs]
     ORC -->|Health| PRO[Proactive Agent]
-    ORC -->|Brain Cascade| LINK{Neural Link}
+    ORC -->|Cascade| LINK{Neural Link}
     LINK -->|Cloud| GEM[Gemini 2.0 / OpenAI]
     LINK -->|Local| OLL[Ollama / Gemma 3]
     LINK -->|Tools| EX[Executor Service]
