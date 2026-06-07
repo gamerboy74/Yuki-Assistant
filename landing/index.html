@@ -10,20 +10,20 @@
 
 <style>
 :root {
-  --bg: #040c10;
-  --bg2: #070f14;
-  --bg3: #0a141a;
+  --bg: #050508;
+  --bg2: #0a0b10;
+  --bg3: #101118;
   --cyan: #00f2ff;
   --cyan-dim: rgba(0,242,255,0.15);
   --cyan-glow: rgba(0,242,255,0.06);
   --magenta: #ff00ff;
   --magenta-dim: rgba(255,0,255,0.12);
-  --green: #00ff41;
-  --white: #e8f4f7;
-  --muted: #4a6b75;
-  --muted2: #2a4550;
+  --green: #00ff66;
+  --white: #eaf2f5;
+  --muted: #6e8494;
+  --muted2: #384d5c;
   --border: rgba(0,242,255,0.12);
-  --border-hot: rgba(0,242,255,0.35);
+  --border-hot: rgba(255,0,255,0.3);
   --font-display: 'Orbitron', monospace;
   --font-mono: 'JetBrains Mono', monospace;
   --font-body: 'Rajdhani', sans-serif;
@@ -58,7 +58,7 @@ body {
 #cursor-ring {
   position: fixed;
   width: 32px; height: 32px;
-  border: 1px solid rgba(0,242,255,0.5);
+  border: 1px solid rgba(255,0,255,0.5);
   border-radius: 50%;
   pointer-events: none;
   z-index: 9998;
@@ -108,7 +108,7 @@ nav {
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 5vw;
   height: 64px;
-  background: rgba(4,12,16,0.85);
+  background: rgba(5,5,8,0.85);
   backdrop-filter: blur(20px);
   border-bottom: 1px solid var(--border);
 }
@@ -120,6 +120,9 @@ nav {
   letter-spacing: 4px;
   text-shadow: 0 0 20px var(--cyan);
   text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .nav-logo span { color: var(--magenta); text-shadow: 0 0 20px var(--magenta); }
 .nav-links {
@@ -180,21 +183,21 @@ nav {
   font-size: 11px;
   letter-spacing: 3px;
   text-transform: uppercase;
-  color: var(--green);
-  border: 1px solid rgba(0,255,65,0.3);
+  color: var(--magenta);
+  border: 1px solid rgba(255,0,255,0.3);
   padding: 6px 14px;
   margin-bottom: 2rem;
 }
 .hero-badge::before {
   content: '';
   width: 6px; height: 6px;
-  background: var(--green);
+  background: var(--magenta);
   border-radius: 50%;
-  animation: pulse-green 1.5s ease-in-out infinite;
+  animation: pulse-magenta-badge 1.5s ease-in-out infinite;
 }
-@keyframes pulse-green {
-  0%,100% { box-shadow: 0 0 0 0 rgba(0,255,65,0.6); }
-  50% { box-shadow: 0 0 0 6px rgba(0,255,65,0); }
+@keyframes pulse-magenta-badge {
+  0%,100% { box-shadow: 0 0 0 0 rgba(255,0,255,0.6); }
+  50% { box-shadow: 0 0 0 6px rgba(255,0,255,0); }
 }
 
 .hero-title {
@@ -224,7 +227,7 @@ nav {
   clip-path: polygon(0 0, 100% 0, 100% 45%, 0 45%);
 }
 .hero-title .glitch::after {
-  color: var(--green);
+  color: var(--cyan);
   animation: glitch2 4s infinite;
   clip-path: polygon(0 55%, 100% 55%, 100% 100%, 0 100%);
 }
@@ -313,12 +316,16 @@ nav {
   border-radius: 50%;
   flex-shrink: 0;
 }
-.status-dot.online { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse-green 2s infinite; }
-.status-dot.warn { background: #ffaa00; box-shadow: 0 0 8px #ffaa00; animation: pulse-warn 2s infinite; }
+.status-dot.online { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); animation: pulse-cyan-dot 2s infinite; }
+.status-dot.warn { background: var(--magenta); box-shadow: 0 0 8px var(--magenta); animation: pulse-magenta-dot 2s infinite; }
 .status-dot.offline { background: #ff3344; }
-@keyframes pulse-warn {
-  0%,100% { box-shadow: 0 0 0 0 rgba(255,170,0,0.6); }
-  50% { box-shadow: 0 0 0 5px rgba(255,170,0,0); }
+@keyframes pulse-cyan-dot {
+  0%,100% { box-shadow: 0 0 0 0 rgba(0,242,255,0.6); }
+  50% { box-shadow: 0 0 0 5px rgba(0,242,255,0); }
+}
+@keyframes pulse-magenta-dot {
+  0%,100% { box-shadow: 0 0 0 0 rgba(255,0,255,0.6); }
+  50% { box-shadow: 0 0 0 5px rgba(255,0,255,0); }
 }
 
 /* ── HERO VISUAL (Right Side) ── */
@@ -334,21 +341,22 @@ nav {
   display: flex; align-items: center; justify-content: center;
 }
 .orb-core {
-  width: 120px; height: 120px;
+  width: 130px; height: 130px;
   border-radius: 50%;
-  background: radial-gradient(circle at 38% 38%, #40faff, #00a0cc 45%, #002a40);
+  background: #050508 url('../public/yuki_logo.png') no-repeat center;
+  background-size: cover;
   box-shadow:
     0 0 40px rgba(0,242,255,0.5),
-    0 0 80px rgba(0,242,255,0.2),
-    0 0 160px rgba(0,242,255,0.08),
-    inset 0 0 30px rgba(0,242,255,0.2);
+    0 0 80px rgba(255,0,255,0.35),
+    0 0 160px rgba(0,242,255,0.1),
+    inset 0 0 20px rgba(255,0,255,0.2);
   animation: orb-breathe 4s ease-in-out infinite;
   position: relative;
   z-index: 3;
 }
 @keyframes orb-breathe {
-  0%,100% { transform: scale(1); box-shadow: 0 0 40px rgba(0,242,255,0.5), 0 0 80px rgba(0,242,255,0.2); }
-  50% { transform: scale(1.05); box-shadow: 0 0 60px rgba(0,242,255,0.7), 0 0 120px rgba(0,242,255,0.3); }
+  0%,100% { transform: scale(1); box-shadow: 0 0 40px rgba(0,242,255,0.5), 0 0 80px rgba(255,0,255,0.35); }
+  50% { transform: scale(1.05); box-shadow: 0 0 60px rgba(0,242,255,0.7), 0 0 120px rgba(255,0,255,0.5); }
 }
 .orb-ring {
   position: absolute;
@@ -407,7 +415,7 @@ nav {
 
 /* ── TERMINAL WINDOW ── */
 .terminal {
-  background: rgba(7,15,20,0.95);
+  background: rgba(5,5,8,0.95);
   border: 1px solid var(--border-hot);
   width: 100%;
   max-width: 500px;
@@ -747,7 +755,7 @@ section {
   color: var(--muted);
 }
 .code-block {
-  background: rgba(4,12,16,0.95);
+  background: rgba(5,5,8,0.95);
   border: 1px solid var(--border-hot);
   box-shadow: 0 0 40px rgba(0,242,255,0.08);
 }
@@ -926,7 +934,10 @@ footer {
 
 <!-- NAV -->
 <nav>
-  <a href="#" class="nav-logo">YUKI<span>.SYS</span></a>
+  <a href="#" class="nav-logo">
+    <img src="../public/yuki_logo.png" alt="Yuki Logo" style="width: 24px; height: 24px; filter: drop-shadow(0 0 8px var(--cyan));" />
+    YUKI<span>.SYS</span>
+  </a>
   <div class="nav-links">
     <a href="#features">Capabilities</a>
     <a href="#cascade">Neural Links</a>
